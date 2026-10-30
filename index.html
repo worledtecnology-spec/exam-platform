@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://www.gstatic.com https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://www.google.com https://www.recaptcha.net 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob: https:; media-src 'self' blob: mediastream:; connect-src 'self' https://*.googleapis.com https://*.firebaseio.com wss://*.firebaseio.com https://*.firebaseapp.com https://nominatim.openstreetmap.org https://script.google.com https://script.googleusercontent.com https://cdn.jsdelivr.net https://storage.googleapis.com https://www.google.com https://www.gstatic.com; frame-src https://*.firebaseapp.com https://www.google.com https://www.recaptcha.net; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'">
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>الاختبارات الإلكترونية</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@600;700;800&family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body class="no-select">
+
+<header class="s-hero" id="hero">
+  <div class="wrap">
+    <div class="logo"><svg viewBox="0 0 24 24" fill="none" stroke="#3a2600" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg></div>
+    <div>
+      <h1 id="platformName">منصة الاختبارات الإلكترونية</h1>
+      <p id="institution"></p>
+    </div>
+    <div class="steps" id="steps"><span class="on">١ البيانات</span><span>٢ التحقق</span><span>٣ الاختبار</span></div>
+  </div>
+</header>
+
+<div class="exam-top hidden" id="examTop">
+  <div class="wrap">
+    <div class="who"><b id="barTitle">—</b><small id="barWho">—</small></div>
+    <span class="rec"><i></i> مراقَب</span>
+    <span class="warn-badge hidden" id="warnBadge">⚠️ إنذار</span>
+    <div class="timer" id="timer">--:--</div>
+  </div>
+  <div class="progress"><i id="progBar"></i></div>
+</div>
+<div class="net-banner hidden" id="netBanner">📡 أنت غير متصل بالإنترنت — إجاباتك محفوظة على جهازك وستُرسل تلقائيًا عند عودة الاتصال</div>
+
+<main class="s-main" id="sMain">
+
+  <section class="screen card center" id="scrLoading">
+    <div class="spinner"></div><p>جارٍ تحميل الاختبارات المتاحة…</p>
+  </section>
+
+  <section class="screen card hidden" id="scrConfig">
+    <h2>المنصة غير مُهيّأة بعد</h2>
+    <p class="sub">افتح ملف <b>config.js</b> والصق إعدادات مشروع Firebase الخاص بك، ثم أعد تحميل الصفحة. التفاصيل في ملف <b>دليل-التشغيل.md</b>.</p>
+  </section>
+
+  <!-- بيانات الطالب -->
+  <section class="screen card hidden" id="scrLogin">
+    <h2>مرحبًا بك 👋</h2>
+    <p class="sub">اختر المقرر وأدخل بياناتك بدقة — لا يُسمح بالدخول إلا مرة واحدة فقط.</p>
+    <label class="field"><span>المقرر / الاختبار</span>
+      <select class="input" id="inExam"></select></label>
+
+    <div id="modeRoster" class="hidden">
+      <label class="field"><span>رقم الجلوس</span>
+        <input class="input" id="inSeat" autocomplete="off" inputmode="numeric" placeholder="اكتب رقم جلوسك"></label>
+      <div class="seat-card hidden" id="seatCard"></div>
+    </div>
+    <div id="modeOpen">
+      <label class="field"><span>الاسم (ثلاثي أو رباعي)</span>
+        <input class="input" id="inName" autocomplete="off" placeholder="مثال: أحمد محمد علي حسن"></label>
+      <label class="field"><span>رقم المجموعة</span>
+        <select class="input" id="inGroup"></select></label>
+    </div>
+
+    <div class="loc wait" id="locBox"><div class="pin">📍</div><div><div class="t">جارٍ تحديد موقعك تلقائيًا…</div><div class="d">اسمح للمتصفح بالوصول إلى الموقع عند ظهور الطلب</div></div></div>
+    <div class="err hidden" id="loginErr"></div>
+    <button class="btn primary lg block" id="btnNext">متابعة ←</button>
+  </section>
+
+  <!-- التحقق والتعليمات -->
+  <section class="screen card hidden" id="scrRules">
+    <h2 id="rTitle">—</h2>
+    <div class="meta-chips" id="rChips"></div>
+    <div class="checks" id="checks"></div>
+
+    <div class="cam-setup hidden" id="camSetup">
+      <div class="cam-frame"><video id="camPreview" autoplay playsinline muted></video><div class="cam-guide" id="camGuide"></div><span class="cam-tag" id="camTag">جارٍ تشغيل الكاميرا…</span></div>
+      <div class="cam-txt"><b>📷 المراقبة بالكاميرا</b><small id="camText">هذا الاختبار مراقَب بالكاميرا: تُلتقط صور لك عند البدء وبشكل دوري وعند أي محاولة غش، وتُرسل للمشرف كدليل. اجلس في مكان مضاء وتأكد أن وجهك ظاهر داخل الإطار.</small>
+        <button class="btn ghost sm hidden" id="btnCamRetry">إعادة تشغيل الكاميرا</button></div>
+    </div>
+
+    <div class="rules" id="rulesList"></div>
+    <label class="agree"><input type="checkbox" id="agree"> <span>قرأت التعليمات وأتعهد بأداء الاختبار بنفسي دون أي مساعدة.</span></label>
+    <div class="err hidden" id="startErr"></div>
+    <div style="display:flex;gap:.7rem;flex-wrap:wrap">
+      <button class="btn gold lg" id="btnStart" disabled>ابدأ الاختبار الآن</button>
+      <button class="btn ghost lg" id="btnBack">رجوع</button>
+    </div>
+  </section>
+
+  <!-- غرفة الانتظار (طلب العودة) -->
+  <section class="screen card final hidden" id="scrWait">
+    <div class="big-ic" style="background:var(--warn-soft)">⏳</div>
+    <h2>لقد خرجت من الاختبار</h2>
+    <p id="waitMsg">تم إرسال طلب عودة للمراقب. انتظر موافقته وستعود لاختبارك تلقائيًا بنفس إجاباتك.</p>
+    <div class="wait-dots"><i></i><i></i><i></i></div>
+    <div style="display:flex;gap:.6rem;justify-content:center;flex-wrap:wrap;margin-top:1.2rem">
+      <button class="btn gold hidden" id="btnGranted">✓ تمت الموافقة — اضغط للمتابعة</button>
+      <button class="btn ghost hidden" id="btnReturnPenalty">العودة الآن مع احتساب محاولة غش</button>
+    </div>
+  </section>
+
+  <!-- الإنذار الثاني: إغلاق ومسح الإجابات -->
+  <section class="screen card final restart hidden" id="scrRestart">
+    <div class="big-ic">🗑️</div>
+    <h2>إنذار ثانٍ — تم إغلاق اختبارك</h2>
+    <p id="restartMsg">تم رصد محاولة غش للمرة الثانية، لذلك <b>تم مسح جميع إجاباتك</b>. يمكنك الدخول مرة أخرى والإجابة من البداية.</p>
+    <div class="final-warn">⚠️ أي محاولة غش أخرى = <b>غلق نهائي ورسوب في الاختبار</b></div>
+    <button class="btn danger lg" id="btnRestart" style="margin-top:1.2rem">الدخول مرة أخرى والبدء من جديد</button>
+  </section>
+
+  <section class="screen card final ok hidden" id="scrDone">
+    <div class="big-ic">✅</div>
+    <h2 id="doneTitle">تم تسليم الاختبار بنجاح</h2>
+    <p id="doneMsg"></p>
+    <span class="save-state" id="saveState">جارٍ حفظ إجاباتك…</span>
+  </section>
+
+  <section class="screen card final fail hidden" id="scrFail">
+    <div class="big-ic">✖</div>
+    <h2>لقد رسبت في الاختبار</h2>
+    <p id="failMsg">تم غلق الاختبار نهائيًا بسبب تكرار محاولات الغش.</p>
+    <div class="final-warn">تم تسجيل جميع المخالفات بالأدلة المصوّرة وإبلاغ المشرف.</div>
+  </section>
+
+  <section class="screen card final bad hidden" id="scrBlocked">
+    <div class="big-ic" id="blkIc">⛔</div>
+    <h2 id="blkTitle">غير مسموح بالدخول</h2>
+    <p id="blkMsg"></p>
+  </section>
+</main>
+<footer class="credits" id="credits">© 2026 All Rights Reserved — Designed &amp; Developed by Dr. Alaa Dawood</footer>
+
+<!-- ======= صفحة الأسئلة ======= -->
+<div class="exam-layout hidden" id="scrExam">
+  <div class="qcard">
+    <div class="qhead">
+      <div class="qnum">السؤال <span id="qNo">1</span> من <span id="qOf" style="font-size:1rem;color:var(--muted)">10</span></div>
+      <div style="display:flex;gap:.4rem;align-items:center;flex-wrap:wrap">
+        <span class="chip blue" id="qType">اختيار من متعدد</span>
+        <span class="chip" id="qPts">درجة واحدة</span>
+        <span class="qtimer hidden" id="qTimer">⏱ <b>30</b></span>
+      </div>
+    </div>
+    <div class="qtext" id="qText"></div>
+    <div class="qimg hidden" id="qImg"></div>
+    <div class="opts" id="qOpts"></div>
+    <div class="qfoot">
+      <button class="btn ghost" id="btnPrev">→ السابق</button>
+      <button class="btn primary" id="btnNextQ">التالي ←</button>
+    </div>
+  </div>
+  <aside class="card qnav-card">
+    <h3>خريطة الأسئلة</h3>
+    <div class="legend"><span><i style="background:var(--ok-soft);border:1px solid #8fd9bd"></i>تمت الإجابة</span><span><i style="background:#fff;border:1px solid var(--line-2)"></i>لم تُجب</span></div>
+    <div class="qnav" id="qNav"></div>
+    <p class="nav-note hidden" id="navNote">🔒 لا يمكن الرجوع للأسئلة السابقة في هذا الاختبار</p>
+    <p style="font-size:.88rem;color:var(--muted);margin-bottom:.8rem">أجبت عن <b id="ansCount">0</b> من <b id="ansTotal">0</b></p>
+    <button class="btn gold block" id="btnSubmit">تسليم الاختبار</button>
+  </aside>
+</div>
+<div class="watermark hidden" id="watermark"></div>
+<div class="selfcam hidden" id="selfcam"><video id="camLive" autoplay playsinline muted></video><span><i></i> REC</span><b class="face-state" id="faceState"></b></div>
+
+<!-- الإنذار الأحمر -->
+<div class="overlay red hidden" id="warnOverlay">
+  <div class="alarm">
+    <div class="siren">🚨</div>
+    <h2>إنذار أول!</h2>
+    <p style="font-size:1.1rem;font-weight:700">تم رصد محاولة غش</p>
+    <div class="why" id="warnWhy">—</div>
+    <p>تم تسجيل المخالفة وتصويرها وإرسال تنبيه فوري للمشرف.<br><b id="warnNext">إذا تكررت سيتم إغلاق الاختبار ومسح جميع إجاباتك.</b></p>
+    <button class="btn lg" id="btnResume">العودة إلى الاختبار</button>
+  </div>
+</div>
+
+<!-- رسالة من المراقب -->
+<div class="overlay hidden" id="msgOverlay">
+  <div class="dialog">
+    <div style="font-size:2.4rem">📢</div>
+    <h3>رسالة من المراقب</h3>
+    <p id="msgText" style="font-size:1.08rem;color:var(--ink);font-weight:600"></p>
+    <div class="row"><button class="btn primary" id="btnMsgOk">حسنًا</button></div>
+  </div>
+</div>
+
+<div class="overlay hidden" id="confirmOverlay">
+  <div class="dialog">
+    <div style="font-size:2.6rem">📤</div>
+    <h3>تسليم الاختبار؟</h3>
+    <p id="confirmMsg"></p>
+    <div class="row">
+      <button class="btn gold" id="btnConfirm">نعم، سلّم الآن</button>
+      <button class="btn ghost" id="btnCancel">مراجعة الإجابات</button>
+    </div>
+  </div>
+</div>
+<div class="s-toast hidden" id="sToast"></div>
+
+<script type="module" src="student.js"></script>
+</body>
+</html>

@@ -1,0 +1,187 @@
+rules_version = '2';
+// =====================================================================
+//  قواعد أمان منصة الاختبارات — الصقها في Firebase ← Firestore Database ← Rules ← Publish
+// =====================================================================
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ✏️ المشرف الرئيسي: الـ UID والبريد (نفس config.js ← SUPER_ADMINS)
+    function isSuper() {
+      return signedIn() && (request.auth.uid in ['W1OrqQiz3ZRJY0TDzIeYZHGWjkx2']
+                            || email() in ['dralaadawood@gmail.com']);
+    }
+
+    // ---------------- أدوات
+    function signedIn() { return request.auth != null; }
+    function email() { return signedIn() ? request.auth.token.get('email', '') : ''; }
+    // المعلم = حساب له مستند في staff (يضيفه المشرف الرئيسي من لوحة «المعلمون»)
+    function isStaff() {
+      return signedIn() && (isSuper() || (email() != '' && exists(/databases/$(database)/documents/staff/$(email()))));
+    }
+    function examPath(eid) { return /databases/$(database)/documents/exams/$(eid); }
+    function ownsExam(eid) {
+      return isSuper() || (isStaff() && exists(examPath(eid)) && get(examPath(eid)).data.owner == email());
+    }
+    function ownsExamAfter(eid) {
+      return isSuper() || (isStaff() && existsAfter(examPath(eid)) && getAfter(examPath(eid)).data.owner == email());
+    }
+    // الاختبار مفتوح الآن (مفعّل + داخل موعد الفتح والإغلاق)
+    function examOpen(eid) {
+      let e = get(examPath(eid)).data;
+      return e.active == true
+        && (e.get('openAt', null) == null || request.time.toMillis() >= e.openAt)
+        && (e.get('closeAt', null) == null || request.time.toMillis() <= e.closeAt + 600000);
+    }
+
+    // ---------------- المعلمون
+    match /staff/{mail} {
+      allow get: if isSuper() || (signedIn() && email() == mail);
+      allow list, create, delete: if isSuper();
+      allow update: if isSuper() || (signedIn() && email() == mail
+                     && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'tgChat'])
+                     && request.resource.data.name is string && request.resource.data.name.size() < 100
+                     && request.resource.data.tgChat is string && request.resource.data.tgChat.size() < 40);
+    }
+
+    // ---------------- بيانات الاختبار العامة (بدون أسئلة)
+    match /exams/{id} {
+      allow read: if true;
+      allow create: if isStaff() && request.resource.data.owner == email() && !('questions' in request.resource.data)
+                    && request.resource.data.duration is int && request.resource.data.duration > 0;
+      allow update: if (isSuper() || (isStaff() && resource.data.owner == email() && request.resource.data.owner == email()))
+                    && !('questions' in request.resource.data);
+      allow delete: if isSuper() || (isStaff() && resource.data.owner == email());
+    }
+
+    // ---------------- الأسئلة: لا تُقرأ إلا أثناء موعد الاختبار (أو للمعلم صاحب الاختبار)
+    match /examQuestions/{id} {
+      allow get: if ownsExam(id) || (signedIn() && exists(examPath(id)) && examOpen(id));
+      allow write: if ownsExamAfter(id) || ownsExam(id);
+    }
+
+    // ---------------- مفاتيح الإجابات: لصاحب الاختبار فقط
+    match /keys/{id} {
+      allow read: if ownsExam(id);
+      allow write: if ownsExamAfter(id) || ownsExam(id);
+    }
+
+    // ---------------- صور الأسئلة: تُعرض فقط أثناء موعد الاختبار
+    match /media/{id} {
+      allow get: if isStaff() || (signedIn() && resource != null && exists(examPath(resource.data.examId)) && examOpen(resource.data.examId));
+      allow create: if isStaff() && request.resource.data.owner == email()
+                    && request.resource.data.data is string && request.resource.data.data.size() < 900000
+                    && request.resource.data.data.matches('data:image/[a-z]+;base64,.*');
+      allow delete: if isSuper() || (isStaff() && (resource == null || resource.data.owner == email()));
+    }
+
+    // ---------------- كشوف الطلاب
+    match /rosters/{id} {
+      allow read, update, delete: if isSuper() || (isStaff() && resource.data.owner == email());
+      allow create: if isStaff() && request.resource.data.owner == email();
+    }
+    match /students/{id} {
+      allow get: if signedIn();   // الطالب يبحث برقم جلوسه فقط — لا يمكن عرض القائمة
+      allow list, update, delete: if isSuper() || (isStaff() && resource.data.owner == email());
+      allow create: if isStaff() && request.resource.data.owner == email();
+    }
+
+    // ---------------- محاولات الطلاب
+    match /attempts/{id} {
+      function mine() { return signedIn() && resource.data.uid == request.auth.uid; }
+      function staffOwns() { return isSuper() || (isStaff() && resource.data.owner == email()); }
+      function inTime(o) {
+        return request.time < o.startedAt + duration.value(o.durationMin + o.get('extraMin', 0) + 3, 'm');
+      }
+      function validCreate(d) {
+        let e = get(examPath(d.examId)).data;
+        let roster = e.get('rosterId', '');
+        return d.uid == request.auth.uid
+          && id.matches('^[A-Za-z0-9_-]{6,160}$')
+          && examOpen(d.examId)
+          && d.owner == e.owner
+          && d.status == 'in_progress' && d.violationCount == 0 && d.restarts == 0 && d.flagCount == 0
+          && d.startedAt == request.time
+          && d.durationMin == e.duration
+          && !('extraMin' in d) && !('manual' in d) && !('resumeGrant' in d) && !('failed' in d)
+          && d.name is string && d.name.size() > 0 && d.name.size() < 150
+          && d.group is string && d.group.size() > 0 && d.group.size() < 12
+          && d.seat is string && d.seat.size() < 30
+          && d.answers is map && d.answers.size() == 0
+          && d.violations is list && d.violations.size() == 0
+          && (roster == ''
+              ? id.matches('^' + d.examId + '_[a-z0-9]+$')
+              : (id == d.examId + '_s' + d.seat
+                 && get(/databases/$(database)/documents/students/$(roster + '_' + d.seat)).data.name == d.name));
+      }
+      function validStudentUpdate() {
+        let d = request.resource.data;
+        let o = resource.data;
+        let ch = d.diff(o).affectedKeys();
+        return o.status in ['in_progress', 'suspended']
+          && ch.hasOnly(['answers', 'qPos', 'violations', 'violationCount', 'lastViolationAt', 'status', 'flags', 'flagCount',
+                         'submittedAt', 'submittedAtMs', 'lockedReason', 'failed', 'lastSeenMs', 'autoSubmitted',
+                         'restarts', 'resumeReq', 'resumeUsed', 'deviceId'])
+          && d.status in ['in_progress', 'suspended', 'submitted', 'locked']
+          && d.violationCount is int && d.violationCount >= o.violationCount
+          && d.restarts is int && d.restarts >= o.restarts
+          && (!ch.hasAny(['answers', 'qPos']) || inTime(o))
+          && d.answers is map && d.answers.size() <= 300
+          && (!ch.hasAny(['qPos']) || d.qPos is int)
+          && (!ch.hasAny(['flagCount']) || d.flagCount is int)
+          && (!ch.hasAny(['lastSeenMs']) || d.lastSeenMs is int)
+          && (!ch.hasAny(['submittedAtMs']) || d.submittedAtMs is int)
+          && (!ch.hasAny(['resumeReq']) || d.resumeReq is int)
+          && (!ch.hasAny(['resumeUsed']) || (d.resumeUsed is int && d.resumeUsed <= o.get('resumeGrant', 0)))
+          && (!ch.hasAny(['violations']) || (d.violations is list && d.violations.size() <= 60))
+          && (!ch.hasAny(['flags']) || (d.flags is list && d.flags.size() <= 220))
+          && (!ch.hasAny(['lockedReason']) || (d.lockedReason is string && d.lockedReason.size() < 300))
+          && (!ch.hasAny(['failed']) || d.failed is bool)
+          && (!ch.hasAny(['autoSubmitted']) || d.autoSubmitted is bool)
+          && (!ch.hasAny(['deviceId']) || d.deviceId == request.auth.uid);
+      }
+
+      allow get: if resource == null || mine() || staffOwns();
+      allow list: if isSuper() || (isStaff() && resource.data.owner == email());
+      allow create: if signedIn() && validCreate(request.resource.data);
+      allow update: if staffOwns() || (mine() && validStudentUpdate());
+      allow delete: if staffOwns();
+
+      // الأدلة المصوّرة: يضيفها الطالب صاحب المحاولة فقط — ويراها المعلم فقط
+      match /evidence/{eid} {
+        function att() { return get(/databases/$(database)/documents/attempts/$(id)).data; }
+        allow create: if signedIn() && att().uid == request.auth.uid
+                      && request.resource.data.img is string && request.resource.data.img.size() < 300000
+                      && request.resource.data.img.matches('data:image/jpeg;base64,.*')
+                      && request.resource.data.kind in ['start', 'periodic', 'violation', 'end']
+                      && request.resource.data.type is string && request.resource.data.type.size() < 300
+                      && (att().status in ['in_progress', 'suspended']
+                          || request.time < att().submittedAt + duration.value(2, 'm'));
+        allow read, delete: if isSuper() || (isStaff() && att().owner == email());
+      }
+    }
+
+    // ---------------- طلبات العودة من جهاز آخر
+    match /resumeRequests/{id} {
+      allow get: if resource == null || (signedIn() && resource.data.uid == request.auth.uid)
+                 || isSuper() || (isStaff() && resource.data.owner == email());
+      allow list: if isSuper() || (isStaff() && resource.data.owner == email());
+      allow create, update: if (signedIn() && request.resource.data.uid == request.auth.uid
+                                && request.resource.data.granted == false && request.resource.data.denied == false
+                                && exists(/databases/$(database)/documents/attempts/$(id))
+                                && request.resource.data.owner == get(/databases/$(database)/documents/attempts/$(id)).data.owner)
+                            || isSuper() || (isStaff() && resource != null && resource.data.owner == email());
+      allow delete: if isSuper() || (isStaff() && (resource == null || resource.data.owner == email()));
+    }
+
+    // ---------------- قفل الجهاز: لا يدخل أكثر من طالب من نفس الجهاز
+    match /deviceLocks/{id} {
+      allow get: if signedIn();
+      allow create: if signedIn() && request.resource.data.uid == request.auth.uid
+                    && id == request.resource.data.examId + '_' + request.auth.uid;
+      allow update: if signedIn() && resource.data.uid == request.auth.uid
+                    && request.resource.data.uid == request.auth.uid
+                    && request.resource.data.attemptId == resource.data.attemptId;
+      allow list, delete: if isStaff();
+    }
+  }
+}

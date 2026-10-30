@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://www.gstatic.com https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://www.google.com https://www.recaptcha.net 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob: https:; media-src 'self' blob: mediastream:; connect-src 'self' https://*.googleapis.com https://*.firebaseio.com wss://*.firebaseio.com https://*.firebaseapp.com https://nominatim.openstreetmap.org https://script.google.com https://script.googleusercontent.com https://cdn.jsdelivr.net https://storage.googleapis.com https://www.google.com https://www.gstatic.com; frame-src https://*.firebaseapp.com https://www.google.com https://www.recaptcha.net; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'">
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>لوحة المشرف — الاختبارات الإلكترونية</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@600;700;800&family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.8.0/mammoth.browser.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+</head>
+<body>
+
+<div class="login-wrap hidden" id="vLogin">
+  <form class="login" id="loginForm">
+    <div class="logo"><svg viewBox="0 0 24 24" fill="none" stroke="#3a2600" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></div>
+    <h1>لوحة المشرف</h1>
+    <p>سجّل الدخول لإدارة الاختبارات ومتابعة الطلاب</p>
+    <label class="field"><span>البريد الإلكتروني</span><input class="input" id="lEmail" type="email" dir="ltr" required></label>
+    <label class="field"><span>كلمة المرور</span><input class="input" id="lPass" type="password" dir="ltr" required></label>
+    <div class="err hidden" id="lErr"></div>
+    <button class="btn primary lg block" id="lBtn">دخول</button>
+    <p class="credits in-login">© 2026 All Rights Reserved — Designed &amp; Developed by Dr. Alaa Dawood</p>
+  </form>
+</div>
+<div class="login-wrap hidden" id="vConfig">
+  <div class="login"><h1>المنصة غير مُهيّأة</h1><p>افتح ملف <b>config.js</b> والصق إعدادات Firebase ثم أعد تحميل الصفحة.</p></div>
+</div>
+
+<div class="admin hidden" id="vApp">
+  <aside class="side">
+    <div class="brand">
+      <div class="logo"><svg viewBox="0 0 24 24" fill="none" stroke="#3a2600" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg></div>
+      <div><b>لوحة المشرف</b><small id="sideInst"></small></div>
+    </div>
+    <button class="nav-btn act" data-tab="live">📡 المتابعة المباشرة <span class="cnt hidden" id="alertCnt">0</span></button>
+    <button class="nav-btn" data-tab="exams">🗂️ المواد والاختبارات</button>
+    <button class="nav-btn" data-tab="rosters">👥 كشوف الطلاب</button>
+    <button class="nav-btn" data-tab="results">📋 النتائج والتصحيح <span class="cnt hidden" id="pendCnt" style="background:var(--info)">0</span></button>
+    <button class="nav-btn" data-tab="reports">📊 التقارير والتحليلات</button>
+    <button class="nav-btn super-only hidden" data-tab="teachers">🧑‍🏫 المعلمون</button>
+    <button class="nav-btn" data-tab="settings">⚙️ الإعدادات</button>
+    <div class="spacer"></div>
+    <div class="tool">🔔 إشعارات سطح المكتب <button class="switch" id="swNotif"></button></div>
+    <div class="tool">🔊 صوت التنبيه <button class="switch on" id="swSound"></button></div>
+    <div class="me" id="meEmail"></div>
+    <div class="credits in-side">© Dr. Alaa Dawood</div>
+    <button class="nav-btn" id="btnLogout">↩️ تسجيل الخروج</button>
+  </aside>
+  <nav class="mobile-nav">
+    <button class="nav-btn act" data-tab="live">📡 المتابعة</button>
+    <button class="nav-btn" data-tab="exams">🗂️ الاختبارات</button>
+    <button class="nav-btn" data-tab="rosters">👥 الكشوف</button>
+    <button class="nav-btn" data-tab="results">📋 النتائج</button>
+    <button class="nav-btn" data-tab="reports">📊 التقارير</button>
+    <button class="nav-btn super-only hidden" data-tab="teachers">🧑‍🏫</button>
+    <button class="nav-btn" data-tab="settings">⚙️</button>
+    <button class="nav-btn" id="btnLogoutM">↩️</button>
+  </nav>
+
+  <main class="amain">
+
+    <!-- ========== المتابعة ========== -->
+    <section class="tab" id="tab-live">
+      <div class="ahead">
+        <div><h1>المتابعة المباشرة</h1><p>كل ما يحدث داخل الاختبارات لحظة بلحظة — وتحكم مباشر في كل طالب</p></div>
+        <span class="live-dot"><i></i> متصل الآن</span>
+      </div>
+      <div class="stats">
+        <div class="stat blue"><div class="si">🧑‍🎓</div><div><div class="v" id="stRun">0</div><div class="l">يؤدون الاختبار الآن</div></div></div>
+        <div class="stat green"><div class="si">✅</div><div><div class="v" id="stDone">0</div><div class="l">سلّموا الاختبار</div></div></div>
+        <div class="stat gold"><div class="si">⚠️</div><div><div class="v" id="stWarn">0</div><div class="l">محاولات غش</div></div></div>
+        <div class="stat red" id="stLockCard"><div class="si">⛔</div><div><div class="v" id="stLock">0</div><div class="l">راسب بسبب الغش</div></div></div>
+      </div>
+      <div class="panel req-panel hidden" id="reqPanel">
+        <div class="panel-h"><h3>⏳ طلبات العودة للاختبار</h3><small style="color:var(--muted)">طلاب خرجوا من الاختبار (انقطاع كهرباء / إنترنت / إغلاق الصفحة) ويطلبون العودة</small></div>
+        <div id="reqList"></div>
+      </div>
+      <div class="two live-two">
+        <div class="panel">
+          <div class="panel-h"><h3>الطلاب داخل الاختبار الآن</h3><div class="toolbar"><button class="btn ghost sm" id="btnMsgAll">📢 رسالة للجميع</button><span class="badge b-run" id="runBadge">0 طالب</span></div></div>
+          <div class="tbl-wrap"><table class="tbl"><thead><tr><th>الطالب</th><th>المجموعة</th><th>المقرر</th><th>التقدم</th><th>الغش</th><th>ثانوية</th><th>المتبقي</th><th>تحكم</th></tr></thead>
+          <tbody id="runBody"></tbody></table></div>
+        </div>
+        <div class="panel">
+          <div class="panel-h"><h3>سجل التنبيهات</h3><button class="btn ghost sm" id="btnClearAlerts">تمييز كمقروء</button></div>
+          <div class="feed" id="feed"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========== الاختبارات ========== -->
+    <section class="tab hidden" id="tab-exams">
+      <div class="ahead"><div><h1>المواد والاختبارات</h1><p>اكتب اسم المادة، ارفع ملف الأسئلة (وورد أو إكسل)، واضبط الإعدادات</p></div></div>
+      <div class="panel">
+        <div class="panel-h"><h3>➕ إنشاء اختبار جديد</h3></div>
+        <div class="panel-b">
+          <div class="form-grid">
+            <label class="field"><span>اسم المادة / المقرر</span><input class="input" id="nCourse" list="courseList" placeholder="مثال: تكنولوجيا التعليم"><datalist id="courseList"></datalist></label>
+            <label class="field"><span>عنوان الاختبار</span><input class="input" id="nTitle" placeholder="مثال: اختبار منتصف الفصل"></label>
+            <label class="field"><span>كشف الطلاب</span><select class="input" id="nRoster"></select></label>
+            <label class="field"><span>مدة الاختبار (بالدقائق)</span><input class="input" id="nDur" type="number" min="1" max="600" value="30"></label>
+            <label class="field"><span>درجة النجاح (%)</span><input class="input" id="nPass" type="number" min="1" max="100" value="50"></label>
+            <label class="field"><span>عدد الأسئلة لكل طالب (بنك الأسئلة)</span><input class="input" id="nDraw" type="number" min="0" value="0" placeholder="0 = كل الأسئلة"></label>
+            <label class="field"><span>يُفتح للطلاب من (اختياري)</span><input class="input" id="nOpen" type="datetime-local"></label>
+            <label class="field"><span>يُغلق تلقائيًا في (اختياري)</span><input class="input" id="nClose" type="datetime-local"></label>
+            <label class="field"><span>الدرجة السالبة للإجابة الخاطئة</span><select class="input" id="nNeg"><option value="0">لا توجد</option><option value="0.25">ربع درجة السؤال</option><option value="0.3333">ثلث درجة السؤال</option><option value="0.5">نصف درجة السؤال</option></select></label>
+            <label class="field"><span>ترتيب الأسئلة</span><select class="input" id="nShuffle"><option value="1">عشوائي لكل طالب</option><option value="0">بنفس ترتيب الملف</option></select></label>
+            <label class="field"><span>ترتيب الاختيارات</span><select class="input" id="nShuffleOpt"><option value="1">عشوائي لكل طالب</option><option value="0">بنفس ترتيب الملف</option></select></label>
+            <label class="field"><span>التنقل بين الأسئلة</span><select class="input" id="nNoBack"><option value="0">حر (يرجع ويعدّل)</option><option value="1">ممنوع الرجوع للسؤال السابق</option></select></label>
+            <label class="field"><span>وقت محدد لكل سؤال (ثانية)</span><input class="input" id="nPerQ" type="number" min="0" value="0" placeholder="0 = بدون"></label>
+            <label class="field"><span>المراقبة بالكاميرا</span><select class="input" id="nCam"><option value="1">مفعّلة — تصوير الطالب كدليل</option><option value="0">بدون كاميرا</option></select></label>
+            <label class="field"><span>كشف الوجه بالذكاء الاصطناعي</span><select class="input" id="nFace"><option value="1">مفعّل (غياب / أكثر من شخص / النظر بعيدًا)</option><option value="0">غير مفعّل</option></select></label>
+          </div>
+          <div class="drop" id="drop">
+            <input type="file" id="nFile" accept=".docx,.xlsx,.xls,.csv">
+            <div class="d-ic">📄</div>
+            <b id="dropTitle">اسحب ملف الأسئلة هنا أو اضغط للاختيار</b>
+            <small>اختيار من متعدد + صواب وخطأ — يتم التعرف على الأسئلة والإجابة الصحيحة تلقائيًا (ويمكن إضافة صور)</small>
+            <div class="fmt"><span class="w">WORD .docx</span><span class="x">EXCEL .xlsx</span></div>
+          </div>
+          <div class="tpl-row">نماذج جاهزة للتعبئة:
+            <a class="btn ghost sm" href="templates/template-word.docx" download="نموذج أسئلة وورد.docx">⬇️ نموذج وورد</a>
+            <a class="btn ghost sm" href="templates/template-excel.xlsx" download="نموذج أسئلة إكسل.xlsx">⬇️ نموذج إكسل</a>
+          </div>
+          <div id="preview" class="hidden" style="margin-top:1.4rem">
+            <div class="panel-h" style="padding:0 0 1rem;border:0"><h3 id="pvTitle">معاينة الأسئلة</h3>
+              <div class="toolbar"><button class="btn ghost" id="btnCancelUp">إلغاء</button><button class="btn gold" id="btnPublish">🚀 حفظ ونشر الاختبار</button></div></div>
+            <div id="pvErr"></div>
+            <div id="pvList"></div>
+          </div>
+        </div>
+      </div>
+      <div class="ahead" style="margin-top:.5rem"><div><h1 style="font-size:1.3rem">الاختبارات المنشورة</h1></div></div>
+      <div class="exam-cards" id="examCards"></div>
+    </section>
+
+    <!-- ========== كشوف الطلاب ========== -->
+    <section class="tab hidden" id="tab-rosters">
+      <div class="ahead"><div><h1>كشوف الطلاب</h1><p>ارفع كشف الأسماء مرة واحدة، ويدخل الطالب برقم جلوسه فقط — ويظهر لك الغائبون تلقائيًا</p></div></div>
+      <div class="panel">
+        <div class="panel-h"><h3>➕ رفع كشف جديد</h3></div>
+        <div class="panel-b">
+          <label class="field"><span>اسم الكشف</span><input class="input" id="rsName" placeholder="مثال: الفرقة الثالثة — تكنولوجيا التعليم 2026"></label>
+          <div class="drop"><input type="file" id="rsFile" accept=".xlsx,.xls,.csv"><div class="d-ic">📑</div><b id="rsDrop">اسحب ملف الإكسل هنا أو اضغط للاختيار</b><small>الأعمدة: رقم الجلوس • اسم الطالب • المجموعة</small></div>
+          <div class="tpl-row"><a class="btn ghost sm" href="templates/template-students.xlsx" download="نموذج كشف الطلاب.xlsx">⬇️ نموذج كشف الطلاب</a></div>
+          <div id="rsPreview" class="hidden" style="margin-top:1.2rem"></div>
+        </div>
+      </div>
+      <div class="exam-cards" id="rosterCards"></div>
+    </section>
+
+    <!-- ========== النتائج ========== -->
+    <section class="tab hidden" id="tab-results">
+      <div class="ahead">
+        <div><h1>النتائج والتصحيح</h1><p>النتائج تظهر لك فقط ولا تظهر للطلاب — مرتبة أبجديًا، واضغط «ورقة الإجابة» لرؤية إجابات الطالب وتصحيح المقالي</p></div>
+        <div class="toolbar">
+          <button class="btn gold hidden" id="btnEssays">✍️ تصحيح المقالي</button>
+          <button class="btn ghost" id="btnResSheet">🖨️ كشف الدرجات الرسمي</button>
+          <button class="btn ok" id="btnAllCourses">📚 شيت الدرجات لكل المقررات</button>
+          <button class="btn ghost" id="btnExport">⬇️ Excel للعرض الحالي</button>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel-h">
+          <div class="toolbar">
+            <select class="input" id="rExam"></select>
+            <select class="input" id="rGroup" style="min-width:140px"></select>
+            <select class="input" id="rStatus" style="min-width:150px">
+              <option value="">كل الحالات</option><option value="submitted">تم التسليم</option><option value="in_progress">جارٍ الآن</option><option value="locked">راسب (غش)</option><option value="warned">حاولوا الغش</option><option value="pending">ينتظر تصحيح المقالي</option>
+            </select>
+            <input class="input" id="rSearch" placeholder="🔍 بحث بالاسم أو رقم الجلوس">
+          </div>
+          <span class="badge b-w0" id="rCount">0</span>
+        </div>
+        <div class="tbl-wrap"><table class="tbl"><thead><tr>
+          <th>م</th><th>اسم الطالب</th><th>المجموعة</th><th>المقرر</th><th>الدرجة</th><th>النسبة</th><th>التقدير</th><th>الحالة</th><th>الغش</th><th>الموقع</th><th>التسليم</th><th></th>
+        </tr></thead><tbody id="rBody"></tbody></table></div>
+      </div>
+    </section>
+
+    <!-- ========== التقارير ========== -->
+    <section class="tab hidden" id="tab-reports">
+      <div class="ahead">
+        <div><h1>التقارير والتحليلات</h1><p>تقرير شامل عن أداء الاختبار والطلاب ومحاولات الغش بالأدلة — وتحليل إحصائي للبحث العلمي</p></div>
+        <div class="toolbar">
+          <select class="input" id="repExam"></select>
+          <select class="input" id="repGroup" style="min-width:140px"></select>
+        </div>
+      </div>
+      <div class="toolbar no-print" style="margin:-.4rem 0 1rem">
+        <button class="btn ghost sm" id="btnGradeSheet">🖨️ كشف الدرجات</button>
+        <button class="btn ghost sm" id="btnCerts">🏅 شهادات المتفوقين</button>
+        <button class="btn ghost sm" id="btnPrint">📄 طباعة التقرير / PDF</button>
+        <button class="btn ok sm" id="btnRepXlsx">⬇️ تقرير Excel شامل + SPSS</button>
+      </div>
+      <div class="rep-tabs no-print" id="repTabs">
+        <button class="act" data-r="overview">📈 نظرة عامة</button>
+        <button data-r="people">🏆 المتفوقون والمتعثرون</button>
+        <button data-r="items">🧩 تحليل الأسئلة</button>
+        <button data-r="groups">👥 المجموعات</button>
+        <button data-r="cheat">🚨 الغش والأدلة</button>
+        <button data-r="prepost">🔬 قبلي / بعدي</button>
+      </div>
+      <div id="repBody"></div>
+    </section>
+
+    <!-- ========== المعلمون ========== -->
+    <section class="tab hidden" id="tab-teachers">
+      <div class="ahead"><div><h1>المعلمون</h1><p>أضف حسابات للمعلمين — كل معلم يرى اختباراته وطلابه فقط، وأنت ترى الكل</p></div></div>
+      <div class="settings-grid">
+        <div class="panel"><div class="panel-h"><h3>➕ إضافة معلم</h3></div><div class="panel-b">
+          <label class="field"><span>اسم المعلم</span><input class="input" id="tName" placeholder="د. ..."></label>
+          <label class="field"><span>البريد الإلكتروني</span><input class="input" id="tEmail" type="email" dir="ltr"></label>
+          <label class="field"><span>كلمة المرور (6 أحرف على الأقل)</span><input class="input" id="tPass" type="text" dir="ltr"></label>
+          <button class="btn gold block" id="btnAddTeacher">إضافة المعلم</button>
+          <p style="font-size:.82rem;color:var(--muted);margin-top:.7rem">أرسل للمعلم رابط لوحة المشرف والبريد وكلمة المرور، ويمكنه تغيير اسمه وإعداد تيليجرام من صفحة الإعدادات.</p>
+        </div></div>
+        <div class="panel"><div class="panel-h"><h3>المعلمون المسجلون</h3></div><div id="teacherList"></div></div>
+      </div>
+    </section>
+
+    <!-- ========== الإعدادات ========== -->
+    <section class="tab hidden" id="tab-settings">
+      <div class="ahead"><div><h1>الإعدادات</h1><p>بياناتك وإشعارات الموبايل عبر تيليجرام</p></div></div>
+      <div class="settings-grid">
+        <div class="panel"><div class="panel-h"><h3>👤 بياناتي</h3></div><div class="panel-b">
+          <label class="field"><span>الاسم (يظهر في كشف الدرجات)</span><input class="input" id="sName"></label>
+          <label class="field"><span>رقم محادثة تيليجرام (Chat ID)</span><input class="input" id="sChat" dir="ltr" placeholder="مثال: 123456789"></label>
+          <div class="toolbar"><button class="btn gold" id="btnSaveProfile">💾 حفظ</button><button class="btn ghost" id="btnTestTg">📨 إرسال رسالة تجريبية</button></div>
+          <p id="tgState" style="font-size:.85rem;margin-top:.8rem"></p>
+        </div></div>
+        <div class="panel"><div class="panel-h"><h3>📱 تفعيل إشعارات تيليجرام</h3></div><div class="panel-b" style="font-size:.9rem;line-height:2">
+          <ol style="padding-right:1.2rem">
+            <li>من تيليجرام افتح <b>@BotFather</b> واكتب <code>/newbot</code> واحفظ الـ <b>Token</b>.</li>
+            <li>افتح البوت الجديد واضغط <b>Start</b>، ثم افتح <b>@userinfobot</b> لتعرف رقمك (Chat ID) والصقه بجانبك.</li>
+            <li>انشر ملف <b>telegram-relay.gs</b> على Google Apps Script (الخطوات في دليل التشغيل) والصق رابطه في <b>config.js</b> ← <code>telegramRelayUrl</code>.</li>
+            <li>اضغط «إرسال رسالة تجريبية». الاختبارات الجديدة ستُرسل لك كل محاولة غش بالصورة على موبايلك.</li>
+          </ol>
+        </div></div>
+      </div>
+    </section>
+    <footer class="credits">© 2026 All Rights Reserved — Designed &amp; Developed by Dr. Alaa Dawood</footer>
+  </main>
+</div>
+
+<div class="toasts" id="toasts"></div>
+<div class="overlay hidden" id="modal"><div class="modal-card" id="modalCard"></div></div>
+
+<script type="module" src="admin.js"></script>
+</body>
+</html>
