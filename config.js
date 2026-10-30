@@ -20,8 +20,11 @@ export const SUPER_ADMINS = ["dralaadawood@gmail.com", "W1OrqQiz3ZRJY0TDzIeYZHGW
 // 3) إعدادات عامة
 export const SETTINGS = {
   platformName: "منصة الاختبارات الإلكترونية",
-  institution: "كلية التربية النوعية — جامعة الزقازيق",
-  department: "قسم تكنولوجيا التعليم",
+  department: "قسم تكنولوجيا التعليم والحاسب الآلي",
+  // الشعارات: ضع الصور في مجلد assets بنفس الأسماء (PNG بخلفية شفافة أفضل)
+  logoRight: "assets/logo-university.png",   // شعار الجامعة — يمين
+  logoLeft: "assets/logo-faculty.png",       // شعار الكلية — يسار
+  logoCenter: "assets/logo-department.png",  // شعار القسم — بجانب اسم المنصة
   groupsCount: 30,          // عدد المجموعات في القائمة المنسدلة (عند عدم استخدام كشف أسماء)
 
   // سلّم العقوبات: كل محاولة غش تنقل الطالب للخطوة التالية
@@ -31,6 +34,16 @@ export const SETTINGS = {
   penalties: ["warn", "restart", "fail"],
 
   requireLocation: true,    // لا يبدأ الطالب إلا بعد السماح بتحديد موقعه
+
+  // موقع أداء الاختبار (يُفعَّل لكل اختبار من «داخل الكلية فقط»)
+  // الإحداثيات والنطاق الافتراضيان — ويمكن تعديلهما لكل اختبار من لوحة المشرف
+  geoFence: {
+    name: "كلية التربية النوعية — جامعة الزقازيق",
+    lat: 30.5952407,
+    lng: 31.5102294,
+    radius: 300,            // نصف قطر المنطقة المسموحة بالمتر حول المركز
+    maxAccuracy: 500        // لو دقة تحديد موقع الطالب أسوأ من كذا متر يُطلب منه إعادة المحاولة
+  },
   requireFullscreen: true,  // فتح الاختبار في وضع ملء الشاشة
   snapshotEveryMin: 2,      // صورة دورية من الكاميرا كل كم دقيقة
   blockMultiScreen: true,   // منع البدء إذا كانت هناك شاشة إضافية متصلة

@@ -173,6 +173,23 @@ service cloud.firestore {
       allow delete: if isSuper() || (isStaff() && (resource == null || resource.data.owner == email()));
     }
 
+    // ---------------- رسائل الطلاب (يرسلها الطالب بعد تسجيل دخوله — يقرؤها المعلم صاحب الاختبار)
+    match /messages/{id} {
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(['uid','owner','examId','course','examTitle','name','group','seat','subject','phone','text','at','read'])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.read == false
+        && request.resource.data.text is string && request.resource.data.text.size() > 1 && request.resource.data.text.size() <= 1200
+        && request.resource.data.name is string && request.resource.data.name.size() < 150
+        && request.resource.data.subject is string && request.resource.data.subject.size() < 80
+        && request.resource.data.phone is string && request.resource.data.phone.size() <= 20
+        && exists(examPath(request.resource.data.examId))
+        && request.resource.data.owner == get(examPath(request.resource.data.examId)).data.owner;
+      allow read, delete: if isSuper() || (isStaff() && resource.data.owner == email());
+      allow update: if (isSuper() || (isStaff() && resource.data.owner == email()))
+                    && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read']);
+    }
+
     // ---------------- قفل الجهاز: لا يدخل أكثر من طالب من نفس الجهاز
     match /deviceLocks/{id} {
       allow get: if signedIn();

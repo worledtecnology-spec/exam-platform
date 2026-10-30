@@ -11,15 +11,18 @@ import { gradeOf, isExpired, isFinished, computeReport } from "./analytics.js";
 import { printGradeSheet } from "./print.js";
 import { $, S, hooks, scoreOf, passOf, nflags, pctColor, mapLink, byName, statusBadge, warnBadge, toast, loadEvidence, shotsHtml, timelineHtml, resultRow, RES_W, sheet, safeName } from "./admin-shared.js";
 import { initReports, renderReports } from "./reports.js";
+import { mountGuide } from "./guide.js";
+import { ADMIN_GUIDE } from "./guide-content.js";
 
 const view = id => ["vLogin", "vConfig", "vApp"].forEach(v => $(v).classList.toggle("hidden", v !== id));
-$("sideInst").textContent = SETTINGS.institution || "";
+$("sideInst").textContent = SETTINGS.department || "";
 if (!isConfigured(firebaseConfig)) { view("vConfig"); throw new Error("config"); }
 frameGuard();
 const app = initializeApp(firebaseConfig);
 await initAppCheck(app, SETTINGS.appCheckSiteKey);
 const db = S.db = getFirestore(app), auth = S.auth = getAuth(app);
-S.qs = {}; S.reqs = {};
+S.qs = {}; S.reqs = {}; S.msgs = {};
+let guideMounted = false;
 
 let firstAttemptsSnap = true, unsubs = [], unread = 0, soundOn = true, notifOn = false, seenAlerts = 0, parsed = null, rosterParsed = null;
 try { soundOn = localStorage.getItem("qz_sound") !== "0"; notifOn = localStorage.getItem("qz_notif") === "1" && Notification.permission === "granted"; } catch { }
@@ -65,6 +68,8 @@ document.querySelectorAll("[data-tab]").forEach(b => b.onclick = () => {
   if (b.dataset.tab === "live") markRead();
   if (b.dataset.tab === "results") renderResults();
   if (b.dataset.tab === "reports") renderReports();
+  if (b.dataset.tab === "guide" && !guideMounted) { mountGuide($("adminGuide"), ADMIN_GUIDE, "دليل استخدام المنصة للمشرف والمعلم"); guideMounted = true; }
+  if (b.dataset.tab === "messages") renderMessages();
   window.scrollTo(0, 0);
 });
 
@@ -116,6 +121,18 @@ function startListeners() {
       if (nu) S.reqs[id] = nu; else delete S.reqs[id];
     });
     firstReq = false; renderRequests();
+  }, permError));
+
+  const msgQ = me.isSuper ? collection(db, "messages") : query(collection(db, "messages"), where("owner", "==", me.email));
+  let firstMsg = true;
+  unsubs.push(onSnapshot(msgQ, snap => {
+    snap.docChanges().forEach(ch => {
+      if (ch.type === "removed") { delete S.msgs[ch.doc.id]; return; }
+      const m = { id: ch.doc.id, ...ch.doc.data() };
+      if (!firstMsg && ch.type === "added") { toast("info", "📨 رسالة جديدة من طالب", `${m.name} — ${m.subject}`, 7000); if (soundOn) beep("ok"); }
+      S.msgs[ch.doc.id] = m;
+    });
+    firstMsg = false; renderMessages();
   }, permError));
 
   if (me.isSuper) unsubs.push(onSnapshot(collection(db, "staff"), snap => {
@@ -338,7 +355,7 @@ window.__detail = async id => {
         <dt>الحالة</dt><dd>${statusBadge(a)} ${num(a.restarts) ? `<span class="badge b-w1">أُعيد ${num(a.restarts)}×</span>` : ""}</dd>
         <dt>الدرجة</dt><dd>${sc ? `<span class="score">${sc.s} <small>/ ${sc.t}</small></span> (${sc.pct}%) — <b style="color:${gr.color}">${gr.label}</b>${sc.pending ? ` <span class="badge b-run">${sc.pending} مقالي ينتظر التصحيح</span>` : ""}` : "—"}</dd>
         <dt>البدء / التسليم</dt><dd>${fmtDateTime(a.startedAtMs)} ← ${fmtDateTime(a.submittedAtMs)}${a.extraMin ? ` • وقت إضافي ${num(a.extraMin)} د` : ""}</dd>
-        <dt>الموقع</dt><dd>${a.location ? `<a href="${mapLink(a)}" target="_blank" rel="noopener">📍 فتح على الخريطة</a><br><small style="color:var(--muted)">${esc(a.location.address || `${a.location.lat}, ${a.location.lng}`)} (±${num(a.location.accuracy)}م)</small>` : `<span style="color:var(--danger)">${esc(a.locationError || "غير متاح")}</span>`}</dd>
+        <dt>الموقع</dt><dd>${a.geoLock ? `<b style="color:var(--ok)">📍 داخل الكلية</b>${a.geoDist != null ? ` (يبعد ${num(a.geoDist)} م عن المركز)` : ""}<br>` : ""}${a.location ? `<a href="${mapLink(a)}" target="_blank" rel="noopener">📍 فتح على الخريطة</a><br><small style="color:var(--muted)">${esc(a.location.address || `${a.location.lat}, ${a.location.lng}`)} (±${num(a.location.accuracy)}م)</small>` : `<span style="color:var(--danger)">${esc(a.locationError || "غير متاح")}</span>`}</dd>
         <dt>الجهاز</dt><dd><small style="color:var(--muted);word-break:break-all">${a.touch ? "📱 جهاز لمس" : "💻 كمبيوتر"} • شاشة ${esc(a.screen || "")}${a.faceAI ? " • 🤖 كشف الوجه" : ""}<br>${esc(a.userAgent || "")}</small></dd>
       </dl>
       ${live ? `<div class="toolbar" style="margin-bottom:1rem"><button class="btn ghost sm" data-act="extend" data-arg="${esc(a.id)}">⏱ إضافة وقت</button><button class="btn ghost sm" data-act="msg" data-arg="${esc(a.id)}">💬 رسالة</button><button class="btn ghost sm" data-act="end" data-arg="${esc(a.id)}">⏹ إنهاء اختباره</button></div>` : ""}
@@ -473,6 +490,7 @@ $("btnPublish").onclick = async () => {
       negative: +$("nNeg").value, perQSec: Math.max(0, parseInt($("nPerQ").value, 10) || 0), noBack: $("nNoBack").value === "1",
       shuffle: $("nShuffle").value === "1", shuffleOptions: $("nShuffleOpt").value === "1",
       camera: $("nCam").value === "1", faceAI: $("nCam").value === "1" && $("nFace").value === "1", active: true,
+      geoLock: $("nGeo").value === "1", geo: { ...SETTINGS.geoFence, radius: Math.max(50, parseInt($("nRadius").value, 10) || SETTINGS.geoFence.radius) },
       rosterId: $("nRoster").value || "", owner: S.me.email, ownerName: S.me.name, notifyChat: S.me.tgChat || "",
       qCount: questions.length, totalPoints: questions.reduce((s, q) => s + q.points, 0),
       createdAt: serverTimestamp(), createdAtMs: Date.now()
@@ -488,7 +506,7 @@ $("btnPublish").onclick = async () => {
 };
 
 // ======================================================= بطاقات الاختبارات
-const studentLink = id => new URL("index.html?exam=" + id, location.href).href;
+const studentLink = id => new URL("student.html?exam=" + id, location.href).href;
 function windowText(e) {
   const now = Date.now();
   if (e.openAt && now < e.openAt) return `<span class="badge b-exp">⏳ يُفتح ${fmtDateTime(e.openAt)}</span>`;
@@ -503,7 +521,7 @@ function renderExams() {
     const n = e.drawCount ? `${e.drawCount} من ${e.qCount}` : e.qCount || e.questions.length;
     return `<div class="ecard ${e.active ? "on" : ""}">
       <div class="course">${esc(e.course)}${S.me.isSuper && e.ownerName ? ` <small style="color:var(--muted);font-weight:600">• ${esc(e.ownerName)}</small>` : ""}</div><h4>${esc(e.title)}</h4>
-      <div class="row"><span class="chip blue">📝 ${n} سؤال</span><span class="chip blue">⏱️ ${e.duration} د</span><span class="chip blue">✔ ${e.passMark || 50}%</span>${e.camera ? `<span class="chip">📷${e.faceAI ? " 🤖" : ""}</span>` : ""}${e.rosterId ? `<span class="chip">👥 ${esc(S.rosters[e.rosterId]?.name || "كشف")}</span>` : ""}${e.negative ? `<span class="chip">➖ سالب</span>` : ""}${e.noBack || e.perQSec ? `<span class="chip">🔒 بلا رجوع</span>` : ""}</div>
+      <div class="row"><span class="chip blue">📝 ${n} سؤال</span><span class="chip blue">⏱️ ${e.duration} د</span><span class="chip blue">✔ ${e.passMark || 50}%</span>${e.camera ? `<span class="chip">📷${e.faceAI ? " 🤖" : ""}</span>` : ""}${e.geoLock ? `<span class="chip">📍 داخل الكلية</span>` : ""}${e.rosterId ? `<span class="chip">👥 ${esc(S.rosters[e.rosterId]?.name || "كشف")}</span>` : ""}${e.negative ? `<span class="chip">➖ سالب</span>` : ""}${e.noBack || e.perQSec ? `<span class="chip">🔒 بلا رجوع</span>` : ""}</div>
       <div class="row"><span class="badge ${e.active ? "b-ok" : "b-w0"}">${e.active ? "● مفتوح للطلاب" : "○ مغلق"}</span>${windowText(e)}<span class="badge b-w0">👥 ${A.length}</span>${A.some(a => a.violationCount) ? `<span class="badge b-w2">⚠️ ${A.filter(a => a.violationCount).length}</span>` : ""}</div>
       <div class="acts">
         <button class="btn ${e.active ? "ghost" : "ok"} sm" data-act="toggle" data-arg="${esc(e.id)}">${e.active ? "⏸ إغلاق" : "▶ فتح"}</button>
@@ -575,10 +593,23 @@ window.__edit = id => {
       <label class="field"><span>ترتيب الاختيارات</span><select class="input" id="eShO">${sel(e.shuffleOptions, "عشوائي", "ثابت")}</select></label>
       <label class="field"><span>الكاميرا</span><select class="input" id="eCam">${sel(e.camera, "مفعّلة", "بدون")}</select></label>
       <label class="field"><span>كشف الوجه</span><select class="input" id="eFace">${sel(e.faceAI, "مفعّل", "غير مفعّل")}</select></label>
+      <label class="field"><span>📍 مكان أداء الاختبار</span><select class="input" id="eGeo">${sel(e.geoLock, "داخل الكلية فقط", "من أي مكان")}</select></label>
+      <label class="field"><span>نطاق السماح (متر)</span><input class="input" id="eRadius" type="number" min="50" max="5000" value="${num((e.geo || SETTINGS.geoFence).radius, 300)}"></label>
+      <label class="field"><span>خط العرض (Latitude)</span><input class="input" id="eLat" dir="ltr" value="${num((e.geo || SETTINGS.geoFence).lat)}"></label>
+      <label class="field"><span>خط الطول (Longitude)</span><input class="input" id="eLng" dir="ltr" value="${num((e.geo || SETTINGS.geoFence).lng)}"></label>
+      <div class="field" style="grid-column:1/-1"><button class="btn ghost sm" id="eHere" type="button">📍 اجعل موقعي الحالي هو مركز الكلية</button> <a class="btn ghost sm" id="eMap" target="_blank" rel="noopener" href="https://www.google.com/maps?q=${num((e.geo || SETTINGS.geoFence).lat)},${num((e.geo || SETTINGS.geoFence).lng)}">🗺 عرض على الخريطة</a><small id="eHereMsg" style="color:var(--muted);display:block;margin-top:.4rem">نصيحة: افتح هذه الشاشة وأنت داخل الكلية واضغط الزر لتحديد المركز بدقة.</small></div>
       <label class="field"><span>كشف الطلاب</span><select class="input" id="eRoster">${rosterOptions(e.rosterId)}</select></label>
       <label class="field"><span>الحالة</span><select class="input" id="eAct">${sel(e.active, "مفتوح للطلاب", "مغلق")}</select></label>
     </div><p style="font-size:.82rem;color:var(--muted);margin-bottom:.8rem">تغيير عدد الأسئلة أو الكشف لا يؤثر على الطلاب الذين بدأوا بالفعل.</p><button class="btn gold block" id="eSave">💾 حفظ التعديلات</button></div>`;
   $("modal").classList.remove("hidden"); $("mClose").onclick = closeModal;
+  $("eHere").onclick = () => {
+    $("eHereMsg").textContent = "جارٍ تحديد موقعك…";
+    navigator.geolocation.getCurrentPosition(p => {
+      $("eLat").value = p.coords.latitude.toFixed(6); $("eLng").value = p.coords.longitude.toFixed(6);
+      $("eMap").href = `https://www.google.com/maps?q=${p.coords.latitude},${p.coords.longitude}`;
+      $("eHereMsg").textContent = `✓ تم — دقة التحديد ≈ ${Math.round(p.coords.accuracy)} متر. اضغط «حفظ التعديلات».`;
+    }, () => { $("eHereMsg").textContent = "تعذّر تحديد موقعك — اسمح للمتصفح بالوصول للموقع."; }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 });
+  };
   $("eSave").onclick = async () => {
     try {
       await updateDoc(doc(db, "exams", id), {
@@ -587,7 +618,9 @@ window.__edit = id => {
         openAt: fromLocalInput($("eOpen").value), closeAt: fromLocalInput($("eClose").value),
         drawCount: Math.max(0, parseInt($("eDraw").value, 10) || 0), perQSec: Math.max(0, parseInt($("ePerQ").value, 10) || 0), negative: +$("eNeg").value,
         noBack: $("eNoBack").value === "1", shuffle: $("eSh").value === "1", shuffleOptions: $("eShO").value === "1",
-        camera: $("eCam").value === "1", faceAI: $("eCam").value === "1" && $("eFace").value === "1", rosterId: $("eRoster").value || "", active: $("eAct").value === "1"
+        camera: $("eCam").value === "1", faceAI: $("eCam").value === "1" && $("eFace").value === "1", rosterId: $("eRoster").value || "", active: $("eAct").value === "1",
+        geoLock: $("eGeo").value === "1",
+        geo: { ...SETTINGS.geoFence, ...(e.geo || {}), radius: Math.max(50, parseInt($("eRadius").value, 10) || 300), lat: Number($("eLat").value) || SETTINGS.geoFence.lat, lng: Number($("eLng").value) || SETTINGS.geoFence.lng }
       });
       closeModal(); toast("ok", "✓ تم الحفظ", e.title);
     } catch (err) { permError(err); }
@@ -836,7 +869,7 @@ $("btnAllCourses").onclick = async () => {
         if (multi) r.push(Math.round(s * 100) / 100, t, t ? Math.round(s / t * 1000) / 10 : 0);
         return r;
       });
-      const aoa = [[`${SETTINGS.institution || ""} — ${SETTINGS.department || ""}`], [`كشف درجات مقرر: ${course}`], [`عدد الطلاب: ${list.length} • عدد الاختبارات: ${exs.length} • تاريخ الاستخراج: ${today}`], [], head, ...rows];
+      const aoa = [[`${SETTINGS.platformName} — ${SETTINGS.department || ""}`], [`كشف درجات مقرر: ${course}`], [`عدد الطلاب: ${list.length} • عدد الاختبارات: ${exs.length} • تاريخ الاستخراج: ${today}`], [], head, ...rows];
       const ws = XLSX.utils.aoa_to_sheet(aoa);
       ws["!merges"] = [0, 1, 2].map(r => ({ s: { r, c: 0 }, e: { r, c: head.length - 1 } }));
       ws["!cols"] = head.map((h, i) => ({ wch: i === 2 ? 30 : i === 0 ? 5 : i === 1 ? 12 : i === 3 ? 9 : Math.max(10, Math.min(28, String(h).length + 2)) }));
@@ -922,3 +955,25 @@ $("btnTestTg").onclick = () => {
 // ======================================================= التقارير
 window.__openKeyFromReport = id => window.__openKey(id);
 initReports();
+
+// ======================================================= رسائل الطلاب
+function renderMessages() {
+  const all = Object.values(S.msgs).sort((a, b) => num(b.at) - num(a.at));
+  const unreadN = all.filter(m => !m.read).length;
+  $("msgCnt").textContent = unreadN; $("msgCnt").classList.toggle("hidden", !unreadN);
+  if (curTab() !== "messages") return;
+  const L = $("mFilter").value === "unread" ? all.filter(m => !m.read) : all;
+  $("msgList").innerHTML = L.length ? L.map(m => `<div class="msg-item ${m.read ? "" : "unread"}">
+    <div class="msg-h"><b>${esc(m.name)}</b><small>مجموعة ${esc(m.group)}${m.seat ? " • جلوس " + esc(m.seat) : ""} • ${esc(m.course)} — ${esc(m.examTitle)}</small><time>${fmtDateTime(num(m.at))}</time></div>
+    <div class="msg-sub">📌 ${esc(m.subject)}${m.phone ? ` • 📞 <span dir="ltr">${esc(m.phone)}</span>` : ""}</div>
+    <div class="msg-t">${esc(m.text)}</div>
+    <div class="row-acts">${m.read ? "" : `<button class="btn ok sm" data-act="msgRead" data-arg="${sid(m.id)}">✓ تمييز كمقروءة</button>`}<button class="btn ghost sm" style="color:var(--danger)" data-act="msgDel" data-arg="${sid(m.id)}">🗑 حذف</button></div>
+  </div>`).join("") : `<div class="empty"><div class="e-ic">📭</div>لا توجد رسائل</div>`;
+}
+$("mFilter").onchange = renderMessages;
+window.__msgRead = async id => { try { await updateDoc(doc(db, "messages", id), { read: true }); } catch (e) { permError(e); } };
+window.__msgDel = async id => { if (!confirm("حذف هذه الرسالة؟")) return; try { await deleteDoc(doc(db, "messages", id)); } catch (e) { permError(e); } };
+$("btnReadAll").onclick = async () => {
+  const U = Object.values(S.msgs).filter(m => !m.read); if (!U.length) return;
+  try { for (let i = 0; i < U.length; i += 400) { const b = writeBatch(db); U.slice(i, i + 400).forEach(m => b.update(doc(db, "messages", m.id), { read: true })); await b.commit(); } } catch (e) { permError(e); }
+};

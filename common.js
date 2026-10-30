@@ -78,3 +78,33 @@ export async function initAppCheck(app, siteKey) {
 export const sid = s => String(s ?? "").replace(/[^A-Za-z0-9_\-]/g, "");
 export const num = (v, d = 0) => { const n = Number(v); return Number.isFinite(n) ? n : d; };
 export const safeImg = s => typeof s === "string" && /^data:image\/(jpeg|png|webp|gif);base64,[A-Za-z0-9+/=]+$/.test(s) ? s : "";
+
+// ---- الهوية: الاسم والقسم والشعارين
+export function brandHtml(S, cls = "") {
+  const logo = (src, side, alt) => `<div class="brand-logo ${side}"><img src="${esc(src || "")}" alt="${alt}"><span class="logo-ph">${alt}</span></div>`;
+  return `<div class="brand-bar ${cls}">${logo(S.logoRight, "r", "شعار الجامعة")}<div class="brand-mid">${S.logoCenter ? `<img class="dept-logo" src="${esc(S.logoCenter)}" alt="">` : ""}<div class="bm-txt"><h1>${esc(S.platformName)}</h1>${S.department ? `<p>${esc(S.department)}</p>` : ""}</div></div>${logo(S.logoLeft, "l", "شعار الكلية")}</div>`;
+}
+// إظهار مكان بديل لو صورة الشعار غير موجودة (بدون أكواد داخل الصفحة لتوافق CSP)
+export function wireLogos(root = document) {
+  root.querySelectorAll(".brand-logo img").forEach(img => {
+    const fail = () => img.closest(".brand-logo").classList.add("missing");
+    if (!img.getAttribute("src")) return fail();
+    img.addEventListener("error", fail, { once: true });
+    if (img.complete && !img.naturalWidth) fail();
+  });
+}
+
+// المسافة بين نقطتين بالمتر
+export function distanceM(a, b) {
+  const R = 6371000, t = Math.PI / 180, dLat = (b.lat - a.lat) * t, dLng = (b.lng - a.lng) * t;
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * t) * Math.cos(b.lat * t) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+// هل الطالب داخل نطاق المكان المحدد؟
+export function geoCheck(loc, fence, maxAcc = 500) {
+  if (!loc) return { ok: false, reason: "noloc" };
+  const d = Math.round(distanceM(loc, fence));
+  if (loc.accuracy > maxAcc) return { ok: false, reason: "inaccurate", d };
+  const ok = d <= fence.radius + Math.min(loc.accuracy || 0, 100);
+  return { ok, reason: ok ? "" : "far", d };
+}

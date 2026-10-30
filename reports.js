@@ -44,7 +44,7 @@ export async function renderReports(all) {
   if (repTab === "prepost" && !all) { body.innerHTML = secPrePostShell(); bindPrePost(); return; }
   const R = await currentReport();
   if (!R) { body.innerHTML = `<div class="panel"><div class="empty"><div class="e-ic">📭</div>لا توجد اختبارات بعد</div></div>`; return; }
-  const head = `<div class="print-head"><h2>${esc(SETTINGS.institution || "")}</h2><p>تقرير اختبار: <b>${esc(R.exam.course)} — ${esc(R.exam.title)}</b>${$("repGroup").value ? ` • مجموعة ${esc($("repGroup").value)}` : ""} • تاريخ التقرير: ${new Date().toLocaleDateString("ar-EG")}</p></div>`;
+  const head = `<div class="print-head"><h2>${esc(SETTINGS.platformName)} — ${esc(SETTINGS.department || "")}</h2><p>تقرير اختبار: <b>${esc(R.exam.course)} — ${esc(R.exam.title)}</b>${$("repGroup").value ? ` • مجموعة ${esc($("repGroup").value)}` : ""} • تاريخ التقرير: ${new Date().toLocaleDateString("ar-EG")}</p></div>`;
   const secs = { overview: secOverview, people: secPeople, items: secItems, groups: secGroups, cheat: secCheat };
   const list = all ? Object.keys(secs) : [repTab];
   const built = list.map(k => ({ k, ...secs[k](R) }));

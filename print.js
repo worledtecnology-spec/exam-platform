@@ -56,7 +56,7 @@ export function printGradeSheet({ exam, rows, absent = [], group = "", owner = "
   thead{display:table-header-group}tr{page-break-inside:avoid}`;
   const body = `
   <div class="head">
-    <div class="r">${esc(SETTINGS.institution || "")}<br>${esc(SETTINGS.department || "")}</div>
+    <div class="r">${esc(SETTINGS.platformName)}<br>${esc(SETTINGS.department || "")}</div>
     <div class="seal">كشف<br>درجات<br>رسمي</div>
     <div class="l">التاريخ: ${today()}<br>${owner ? "أستاذ المقرر: " + esc(owner) : ""}</div>
   </div>
@@ -107,7 +107,7 @@ export function printCertificates({ exam, rows }) {
     <path d="M60 84l8 17 18 2-13 12 4 18-17-9-17 9 4-18-13-12 18-2z" fill="#fff"/></svg>`;
   const body = rows.map(r => `<div class="cert"><div class="frame"></div><div class="corner c1"></div><div class="corner c2"></div><div class="corner c3"></div><div class="corner c4"></div>
     ${medal}<div class="in">
-      <div class="inst">${esc(SETTINGS.institution || "")}${SETTINGS.department ? " — " + esc(SETTINGS.department) : ""}</div>
+      <div class="inst">${esc(SETTINGS.department || "")}</div>
       <div class="title">شهادة <span>تفوق</span></div>
       <div class="lead">يسعدنا أن نمنح هذه الشهادة إلى الطالب / الطالبة</div>
       <div class="name">${esc(r.a.name)}</div>

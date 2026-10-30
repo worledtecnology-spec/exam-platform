@@ -3,31 +3,38 @@ import { getFirestore, collection, query, where, getDocs, doc, getDoc, setDoc, u
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { firebaseConfig, SETTINGS } from "./config.js";
-import { isConfigured, normalizeName, hashStr, seededShuffle, esc, mmss, fmtDateTime, LETTERS, frameGuard, initAppCheck } from "./common.js";
+import { isConfigured, normalizeName, hashStr, seededShuffle, esc, mmss, fmtDateTime, LETTERS, frameGuard, initAppCheck, brandHtml, wireLogos, geoCheck } from "./common.js";
 import { pickQuestions, isAnswered } from "./scoring.js";
 import { TYPE_LABEL } from "./parser.js";
 import { loadFaceDetector, detectFaces, faceReady } from "./face.js";
+import { mountGuide } from "./guide.js";
+import { STUDENT_GUIDE } from "./guide-content.js";
 
 const $ = id => document.getElementById(id);
 const PEN = SETTINGS.penalties && SETTINGS.penalties.length ? SETTINGS.penalties : ["warn", "restart", "fail"];
 const PEN_TEXT = { warn: "إنذار أحمر وتكمل الاختبار", restart: "إغلاق الاختبار ومسح جميع إجاباتك ثم تبدأ من جديد", fail: "غلق نهائي و<b>رسوب في الاختبار</b>" };
 const ORD = ["الأولى", "الثانية", "الثالثة", "الرابعة", "الخامسة"];
-const MAIN_SCREENS = ["scrLoading", "scrConfig", "scrLogin", "scrRules", "scrWait", "scrRestart", "scrDone", "scrFail", "scrBlocked"];
+const MAIN_SCREENS = ["scrLoading", "scrConfig", "scrLogin", "scrRules", "scrWait", "scrRestart", "scrDone", "scrFail", "scrBlocked", "scrGuide", "scrContact"];
+let loggedIn = false, lastMain = "scrLogin";
 function show(id) {
   MAIN_SCREENS.forEach(s => $(s).classList.toggle("hidden", s !== id));
+  if (id !== "scrGuide" && id !== "scrContact" && id !== "scrExam") lastMain = id;
+  const sub = id === "scrGuide" ? "guide" : id === "scrContact" ? "contact" : "exam";
+  $("sNav").classList.toggle("hidden", !loggedIn || id === "scrExam");
+  document.querySelectorAll("#sNav button").forEach(b => b.classList.toggle("act", b.dataset.go === sub));
   const inExam = id === "scrExam";
   ["scrExam", "examTop", "watermark"].forEach(x => $(x).classList.toggle("hidden", !inExam));
   $("selfcam").classList.toggle("hidden", !(inExam && camStream));
+  document.body.classList.toggle("cam-on", !!(inExam && camStream));
   $("hero").classList.toggle("hidden", inExam);
   $("sMain").classList.toggle("hidden", inExam);
   $("credits").classList.toggle("hidden", inExam);
   const st = { scrLogin: 0, scrRules: 1, scrWait: 1, scrRestart: 2, scrDone: 2, scrFail: 2, scrBlocked: 2 }[id];
-  document.querySelectorAll("#steps span").forEach((s, i) => s.classList.toggle("on", st !== undefined && i <= st));
+  document.querySelectorAll("#steps li").forEach((s, i) => { s.classList.toggle("on", st !== undefined && i <= st); s.classList.toggle("done", st !== undefined && i < st); });
   window.scrollTo(0, 0);
 }
 function toast(msg, ms = 4000) { const t = $("sToast"); t.innerHTML = msg; t.classList.remove("hidden"); clearTimeout(t._h); t._h = setTimeout(() => t.classList.add("hidden"), ms); }
-$("platformName").textContent = SETTINGS.platformName;
-$("institution").textContent = SETTINGS.institution || "";
+$("brandSlot").innerHTML = brandHtml(SETTINGS); wireLogos();
 document.title = SETTINGS.platformName;
 $("inGroup").innerHTML = `<option value="">— اختر رقم مجموعتك —</option>` +
   Array.from({ length: SETTINGS.groupsCount || 30 }, (_, i) => `<option value="${i + 1}">المجموعة ${i + 1}</option>`).join("");
@@ -126,6 +133,22 @@ function getLocation() {
     setLoc("bad", locErr, err.code === 1 ? "افتح إعدادات الموقع في المتصفح واسمح بالوصول ثم اضغط «إعادة المحاولة»" : "تأكد من تشغيل خدمة الموقع (GPS) ثم اضغط «إعادة المحاولة»", true);
   }, { enableHighAccuracy: true, timeout: 20000, maximumAge: 60000 });
 }
+// تحديث الموقع بدقة عالية (يُستخدم للتحقق من التواجد داخل الكلية)
+function refreshLoc() {
+  return new Promise(res => {
+    if (!navigator.geolocation) return res(loc);
+    navigator.geolocation.getCurrentPosition(p => {
+      loc = { ...(loc || {}), lat: +p.coords.latitude.toFixed(6), lng: +p.coords.longitude.toFixed(6), accuracy: Math.round(p.coords.accuracy), address: (loc && loc.address) || "" };
+      locErr = null; res(loc);
+    }, () => res(loc), { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 });
+  });
+}
+const fenceOf = e => e && e.geoLock ? { ...SETTINGS.geoFence, ...(e.geo || {}) } : null;
+function geoMsg(g, f) {
+  if (g.reason === "noloc") return "يجب السماح بتحديد الموقع — هذا الاختبار متاح داخل الكلية فقط.";
+  if (g.reason === "inaccurate") return "تحديد موقعك غير دقيق. شغّل الـ GPS (أو الواي فاي على اللابتوب) واخرج قريبًا من نافذة، ثم أعد المحاولة.";
+  return `⛔ هذا الاختبار متاح فقط داخل ${f.name || "الكلية"}. موقعك الحالي يبعد حوالي ${g.d >= 1000 ? (g.d / 1000).toFixed(1) + " كم" : g.d + " متر"} عن مكان الاختبار.`;
+}
 function setLoc(kind, t, d, retry) {
   const b = $("locBox"); b.className = "loc " + kind;
   b.innerHTML = `<div class="pin">${kind === "ok" ? "✅" : kind === "bad" ? "⚠️" : "📍"}</div>
@@ -153,15 +176,25 @@ $("btnNext").onclick = async () => {
     if (!group) return loginError("من فضلك اختر رقم المجموعة.");
     me = { name, group, seat: "" };
   }
-  if (SETTINGS.requireLocation && !loc) return loginError("يجب السماح بتحديد الموقع لدخول الاختبار.");
+  if (SETTINGS.requireLocation && !loc && !e.geoLock) return loginError("يجب السماح بتحديد الموقع لدخول الاختبار.");
 
   const btn = $("btnNext"); btn.disabled = true; btn.textContent = "جارٍ التحقق…";
+  // الاختبار داخل الكلية فقط: التحقق من موقع الطالب قبل أي شيء
+  const fence = fenceOf(e);
+  if (fence) {
+    btn.textContent = "جارٍ التحقق من موقعك…";
+    await refreshLoc();
+    const g = geoCheck(loc, fence, fence.maxAccuracy || 500);
+    if (loc) setLoc(g.ok ? "ok" : "bad", g.ok ? `أنت داخل ${fence.name || "مكان الاختبار"} ✓` : "خارج مكان الاختبار", g.ok ? `دقة التحديد ≈ ${loc.accuracy} متر` : `يبعد حوالي ${g.d} متر`, !g.ok);
+    if (!g.ok) { btn.disabled = false; btn.textContent = "متابعة ←"; return loginError(geoMsg(g, fence)); }
+  }
   try {
     // الأسئلة محمية: لا تُقرأ إلا أثناء موعد الاختبار
     let qd = null;
     try { qd = await getDoc(doc(db, "examQuestions", exId)); } catch (err) { console.warn(err); }
     if (!qd || !qd.exists()) return blocked("⏳", "الاختبار غير متاح الآن", "لم يبدأ موعد الاختبار بعد أو تم إغلاقه. حاول مرة أخرى في الموعد المحدد.");
     exam = { ...e, questions: qd.data().questions || [] };
+    loggedIn = true;
     qById = Object.fromEntries(exam.questions.map(q => [q.id, q]));
     attemptId = me.seat ? `${exId}_s${me.seat}` : exId + "_" + hashStr(normalizeName(me.name) + "|" + me.group);
     attemptRef = doc(db, "attempts", attemptId);
@@ -195,16 +228,15 @@ function renderRules() {
   $("rTitle").textContent = exam.title;
   const n = exam.drawCount > 0 && exam.drawCount < exam.questions.length ? exam.drawCount : exam.questions.length;
   $("rChips").innerHTML = `<span class="chip blue">📚 ${esc(exam.course)}</span><span class="chip">📝 ${n} سؤال</span>
-    <span class="chip">⏱️ ${exam.duration} دقيقة</span><span class="chip blue">👤 ${esc(me.name)} — مجموعة ${esc(me.group)}${me.seat ? ` — جلوس ${esc(me.seat)}` : ""}</span>`;
+    <span class="chip">⏱️ ${exam.duration} دقيقة</span><span class="chip blue">👤 ${esc(me.name)} — م${esc(me.group)}${me.seat ? ` — ${esc(me.seat)}` : ""}</span>`;
   const R = [];
-  R.push(["⏱️", "الوقت محسوب", "يبدأ العدّاد عند الضغط على «ابدأ الاختبار» ويُسلَّم تلقائيًا عند انتهاء الوقت.", ""]);
-  if (exam.perQSec > 0) R.push(["⏳", `وقت محدد لكل سؤال: ${exam.perQSec} ثانية`, "عند انتهاء وقت السؤال ينتقل الاختبار للسؤال التالي تلقائيًا ولا يمكن الرجوع إليه.", ""]);
-  else if (exam.noBack) R.push(["🔒", "لا يمكن الرجوع للسؤال السابق", "بعد الانتقال للسؤال التالي لا يمكنك العودة لتعديل إجابتك.", ""]);
-  if (exam.negative > 0) R.push(["➖", "توجد درجة سالبة", `كل إجابة خاطئة في أسئلة الاختيار والصح والخطأ يُخصم عليها ${exam.negative === 0.25 ? "ربع" : exam.negative === 0.5 ? "نصف" : exam.negative >= 0.33 && exam.negative < 0.34 ? "ثلث" : exam.negative} درجة السؤال. اترك السؤال إن لم تكن متأكدًا.`, ""]);
-  R.push(["🔀", "أسئلتك بترتيب خاص بك", "كل طالب يرى أسئلة واختيارات بترتيب مختلف" + (exam.drawCount > 0 && exam.drawCount < exam.questions.length ? "، وتُسحب الأسئلة عشوائيًا من بنك الأسئلة." : "."), ""]);
-  R.push(["🚫", "أي خروج من صفحة الاختبار = محاولة غش", "فتح تطبيق أو تبويب أو نافذة أخرى، تقسيم الشاشة، الخروج من ملء الشاشة، إيقاف الكاميرا" + (exam.faceAI ? "، الابتعاد عن الكاميرا أو ظهور شخص آخر" : "") + "، أو إغلاق الصفحة — كلها تُرصد وتُصوَّر وتُرسل للمشرف فورًا.", "red"]);
-  R.push(["⚖️", "عقوبات محاولات الغش", PEN.map((p, i) => `المرة ${ORD[i] || i + 1}: ${PEN_TEXT[p]}`).join("<br>"), "red"]);
-  $("rulesList").innerHTML = R.map(([ic, b, s, c]) => `<div class="rule ${c}"><div class="ic">${ic}</div><div><b>${b}</b><small>${s}</small></div></div>`).join("");
+  R.push(["⏱️", "الوقت محسوب ويُسلَّم الاختبار تلقائيًا عند انتهائه", ""]);
+  if (exam.perQSec > 0) R.push(["⏳", `لكل سؤال ${exam.perQSec} ثانية ولا يمكن الرجوع للسؤال السابق`, ""]);
+  else if (exam.noBack) R.push(["🔒", "لا يمكن الرجوع للسؤال السابق بعد الانتقال", ""]);
+  if (exam.negative > 0) R.push(["➖", "توجد درجة سالبة للإجابة الخاطئة — اترك السؤال إن لم تكن متأكدًا", ""]);
+  R.push(["🚫", "الخروج من صفحة الاختبار أو فتح أي تطبيق أو شاشة أخرى" + (exam.camera ? " أو الابتعاد عن الكاميرا" : "") + " = محاولة غش", "red"]);
+  R.push(["⚖️", PEN.map((p, i) => `<b>${i + 1}</b> ${({ warn: "إنذار", restart: "مسح الإجابات والبدء من جديد", fail: "رسوب" })[p]}`).join(" ← "), "red"]);
+  $("rulesList").innerHTML = R.map(([ic, t, c]) => `<div class="rule ${c}"><div class="ic">${ic}</div><div>${t}</div></div>`).join("");
 }
 
 // ---------------------------------------------------------------- pre-exam checks
@@ -212,26 +244,27 @@ let checks = {};
 function renderChecks() {
   const rows = [
     ["id", "بيانات الطالب", me.seat ? "تم التحقق من رقم الجلوس" : "تم التحقق من الاسم والمجموعة"],
-    ["loc", "تحديد الموقع", loc ? "تم تحديد موقعك" : "غير متاح"],
+    exam.geoLock ? ["geo", "داخل الكلية", checks.geo && checks.geo.ok ? `على بعد ${checks.geo.d} م من المركز` : checks.geo ? "خارج مكان الاختبار" : "…"] : ["loc", "تحديد الموقع", loc ? "تم تحديد موقعك" : "غير متاح"],
     exam.camera ? ["cam", "الكاميرا", camOk ? "تعمل بشكل سليم" : checks.cam === "wait" ? "جارٍ التشغيل…" : "مطلوبة — اسمح بالوصول للكاميرا"] : null,
     exam.camera && exam.faceAI ? ["face", "كشف الوجه", checks.faceMsg || "…"] : null,
     ["screen", "شاشة واحدة فقط", checks.screen ? "لا توجد شاشات إضافية" : "افصل الشاشة الإضافية ثم أعد المحاولة"],
     ["net", "الاتصال بالإنترنت", navigator.onLine ? "متصل" : "غير متصل"]
   ].filter(Boolean);
   $("checks").innerHTML = rows.map(([k, t, d]) => {
-    const st = k === "id" ? true : k === "loc" ? (!!loc || !SETTINGS.requireLocation) : k === "cam" ? (checks.cam === "wait" ? "wait" : camOk) : k === "face" ? checks.face : k === "net" ? navigator.onLine : checks.screen;
+    const st = k === "id" ? true : k === "geo" ? !!(checks.geo && checks.geo.ok) : k === "loc" ? (!!loc || !SETTINGS.requireLocation) : k === "cam" ? (checks.cam === "wait" ? "wait" : camOk) : k === "face" ? checks.face : k === "net" ? navigator.onLine : checks.screen;
     return `<div class="chk ${st === "wait" ? "wait" : st ? "ok" : "bad"}"><i>${st === "wait" ? "…" : st ? "✓" : "✕"}</i><div><b>${t}</b><small>${esc(d)}</small></div></div>`;
   }).join("");
   updateStartBtn();
 }
 function allChecksOk() {
-  return (!exam.camera || camOk) && (!(exam.camera && exam.faceAI) || checks.face === true) && checks.screen && navigator.onLine && (!SETTINGS.requireLocation || loc);
+  return (!exam.geoLock || (checks.geo && checks.geo.ok)) && (!exam.camera || camOk) && (!(exam.camera && exam.faceAI) || checks.face === true) && checks.screen && navigator.onLine && (!SETTINGS.requireLocation || loc);
 }
 function updateStartBtn() { $("btnStart").disabled = !($("agree").checked && allChecksOk()); }
 $("agree").onchange = updateStartBtn;
 
 async function runChecks() {
   checks = { screen: !(SETTINGS.blockMultiScreen && window.screen && window.screen.isExtended === true) };
+  if (exam.geoLock) { const f = fenceOf(exam); checks.geo = geoCheck(loc, f, f.maxAccuracy || 500); }
   $("camSetup").classList.toggle("hidden", !exam.camera);
   renderChecks();
   if (exam.camera) { checks.cam = "wait"; renderChecks(); await startCamera(); }
@@ -311,6 +344,11 @@ const who = () => `👤 ${me.name}\n👥 مجموعة ${me.group}${me.seat ? ` �
 
 // ---------------------------------------------------------------- start / resume
 $("btnStart").onclick = async () => {
+  if (exam.geoLock) {
+    const f = fenceOf(exam); await refreshLoc(); checks.geo = geoCheck(loc, f, f.maxAccuracy || 500); renderChecks();
+    if (!checks.geo.ok) { $("startErr").textContent = geoMsg(checks.geo, f); $("startErr").classList.remove("hidden"); return; }
+    $("startErr").classList.add("hidden");
+  }
   if (!allChecksOk()) return;
   const btn = $("btnStart"); btn.disabled = true; btn.textContent = "جارٍ البدء…";
   enterFullscreen();
@@ -320,7 +358,7 @@ $("btnStart").onclick = async () => {
     await setDoc(attemptRef, {
       examId: exam.id, examTitle: exam.title, course: exam.course, owner: exam.owner || "",
       name: me.name, nameKey: normalizeName(me.name), group: me.group, seat: me.seat || "", rosterId: exam.rosterId || "",
-      uid: deviceId, deviceId, location: loc, locationError: locErr, camera: !!camOk, faceAI: !!(exam.faceAI && faceOn),
+      uid: deviceId, deviceId, geoLock: !!exam.geoLock, geoDist: checks.geo ? checks.geo.d : null, location: loc, locationError: locErr, camera: !!camOk, faceAI: !!(exam.faceAI && faceOn),
       status: "in_progress", startedAt: serverTimestamp(), startedAtMs: now, durationMin: exam.duration,
       qIds, answers: {}, qPos: 0, restarts: 0, violations: [], violationCount: 0, flags: [], flagCount: 0, qCount: qIds.length,
       screen: `${screen.width}×${screen.height}`, touch: isTouch, lastSeenMs: now,
@@ -556,10 +594,59 @@ function askSubmit() {
 $("btnCancel").onclick = () => $("confirmOverlay").classList.add("hidden");
 $("btnConfirm").onclick = () => { $("confirmOverlay").classList.add("hidden"); finalize(false); };
 
+// ===== تنبيهات قرب انتهاء الوقت =====
+const TIME_ALERTS = [
+  { sec: 600, lvl: "warn", title: "متبقي 10 دقائق على انتهاء الاختبار", sub: "راجع الأسئلة التي لم تُجب عنها (المربعات غير الملوّنة)." },
+  { sec: 300, lvl: "warn", title: "متبقي 5 دقائق فقط!", sub: "أكمل إجاباتك الآن — سيُسلَّم الاختبار تلقائيًا عند انتهاء الوقت." },
+  { sec: 60, lvl: "low", title: "متبقي دقيقة واحدة!", sub: "سيتم تسليم إجاباتك تلقائيًا خلال دقيقة." },
+  { sec: 15, lvl: "low", title: "15 ثانية…", sub: "جارٍ الاستعداد للتسليم التلقائي." }
+];
+let alertsFired = null, taTimer = 0;
+function alertBeep(times) {
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return;
+    const ac = alertBeep.ac || (alertBeep.ac = new AC()); ac.resume?.();
+    for (let i = 0; i < times; i++) {
+      const o = ac.createOscillator(), g = ac.createGain(), t0 = ac.currentTime + i * 0.28;
+      o.type = "sine"; o.frequency.value = 880; o.connect(g); g.connect(ac.destination);
+      g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(0.25, t0 + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.2);
+      o.start(t0); o.stop(t0 + 0.22);
+    }
+  } catch { /* بدون صوت */ }
+  try { navigator.vibrate?.(times > 1 ? [200, 100, 200] : 200); } catch { /* */ }
+}
+function showTimeAlert(a) {
+  const el = $("timeAlert");
+  $("taTitle").textContent = a.title; $("taSub").textContent = a.sub;
+  el.classList.remove("hidden", "warn", "low"); el.classList.add(a.lvl);
+  void el.offsetWidth; el.classList.add("show");
+  alertBeep(a.lvl === "low" ? 2 : 1);
+  clearTimeout(taTimer); taTimer = setTimeout(hideTimeAlert, a.sec <= 15 ? 15000 : 7000);
+}
+function hideTimeAlert() { const el = $("timeAlert"); el.classList.remove("show"); el.classList.add("hidden"); }
+$("taClose").onclick = hideTimeAlert;
+function checkTimeAlerts(left) {
+  const total = (endAt - startMs) / 1000;
+  if (!alertsFired) { // أول مرة: لا نعرض تنبيهات لعتبات تجاوزها الطالب بالفعل أو أكبر من نصف المدة
+    alertsFired = new Set(TIME_ALERTS.filter(a => left <= a.sec || a.sec >= total / 2).map(a => a.sec));
+    return;
+  }
+  const a = TIME_ALERTS.find(x => left <= x.sec && !alertsFired.has(x.sec));
+  if (!a) return;
+  TIME_ALERTS.filter(x => left <= x.sec).forEach(x => alertsFired.add(x.sec));
+  showTimeAlert(a);
+}
+
 function tick() {
   const left = (endAt - Date.now()) / 1000;
+  if (running && left > 0) checkTimeAlerts(left);
   const t = $("timer"); t.textContent = mmss(left);
   t.classList.toggle("low", left <= 60);
+  const t2 = $("timer2"); t2.textContent = mmss(left);
+  const total = Math.max(1, endAt - startMs), frac = Math.max(0, Math.min(1, (endAt - Date.now()) / total));
+  $("tbarFill").style.width = (frac * 100) + "%";
+  $("sideTimer").classList.toggle("warn", left <= 300 && left > 60);
+  $("sideTimer").classList.toggle("low", left <= 60);
   if (left <= 0 && running) return finalize(true);
   const qt = $("qTimer");
   if (running && exam.perQSec > 0 && qDeadline) {
@@ -572,6 +659,7 @@ function tick() {
 function stopExam(keepCamera) {
   running = false;
   [timerInt, hbInt, snapInt, guardInt, faceInt].forEach(clearInterval); clearTimeout(saveTimer);
+  hideTimeAlert(); alertsFired = null;
   ["warnOverlay", "confirmOverlay", "msgOverlay"].forEach(x => $(x).classList.add("hidden"));
   exitFullscreen();
   if (!keepCamera) stopCamera();
@@ -791,3 +879,29 @@ function blocked(ic, title, msg) {
   $("blkIc").textContent = ic; $("blkTitle").textContent = title; $("blkMsg").textContent = msg;
   show("scrBlocked");
 }
+
+// ---------------------------------------------------------------- دليل الطالب + التواصل (بعد تسجيل الدخول فقط)
+let guideMounted = false, lastSend = 0;
+$("sNav").onclick = e => {
+  const b = e.target.closest("[data-go]"); if (!b || !loggedIn) return;
+  if (b.dataset.go === "guide") { if (!guideMounted) { mountGuide($("scrGuide"), STUDENT_GUIDE, "دليل الطالب"); guideMounted = true; } show("scrGuide"); }
+  else if (b.dataset.go === "contact") { $("cWho").textContent = `${me.name} — مجموعة ${me.group}${me.seat ? " — جلوس " + me.seat : ""} — ${exam.course}`; $("cErr").classList.add("hidden"); show("scrContact"); }
+  else show(lastMain);
+};
+$("btnSend").onclick = async () => {
+  const text = $("cText").value.trim(), phone = $("cPhone").value.replace(/[^\d+]/g, "").slice(0, 20);
+  const er = m => { $("cErr").textContent = m; $("cErr").classList.toggle("hidden", !m); };
+  er(""); $("cOk").classList.add("hidden");
+  if (!loggedIn || !exam) return;
+  if (text.length < 5) return er("اكتب رسالتك أولًا.");
+  if (Date.now() - lastSend < 60000) return er("انتظر دقيقة قبل إرسال رسالة أخرى.");
+  const b = $("btnSend"); b.disabled = true; b.textContent = "جارٍ الإرسال…";
+  try {
+    await addDoc(collection(db, "messages"), {
+      uid: deviceId, owner: exam.owner || "", examId: exam.id, course: exam.course || "", examTitle: exam.title || "",
+      name: me.name, group: String(me.group), seat: me.seat || "", subject: $("cSubject").value, phone, text: text.slice(0, 1200), at: Date.now(), read: false
+    });
+    lastSend = Date.now(); $("cText").value = ""; $("cOk").classList.remove("hidden");
+  } catch (err) { console.error(err); er("تعذّر الإرسال، حاول مرة أخرى."); }
+  finally { b.disabled = false; b.textContent = "إرسال الرسالة"; }
+};

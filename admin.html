@@ -18,13 +18,14 @@
 
 <div class="login-wrap hidden" id="vLogin">
   <form class="login" id="loginForm">
-    <div class="logo"><svg viewBox="0 0 24 24" fill="none" stroke="#3a2600" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></div>
+    <div class="login-logos"><img src="assets/logo-university.png" alt="شعار الجامعة"><img src="assets/logo-department.png" alt="شعار القسم"><img src="assets/logo-faculty.png" alt="شعار الكلية"></div>
     <h1>لوحة المشرف</h1>
     <p>سجّل الدخول لإدارة الاختبارات ومتابعة الطلاب</p>
     <label class="field"><span>البريد الإلكتروني</span><input class="input" id="lEmail" type="email" dir="ltr" required></label>
     <label class="field"><span>كلمة المرور</span><input class="input" id="lPass" type="password" dir="ltr" required></label>
     <div class="err hidden" id="lErr"></div>
     <button class="btn primary lg block" id="lBtn">دخول</button>
+    <p class="center"><a class="back-home" href="index.html">← الصفحة الرئيسية</a></p>
     <p class="credits in-login">© 2026 All Rights Reserved — Designed &amp; Developed by Dr. Alaa Dawood</p>
   </form>
 </div>
@@ -36,7 +37,7 @@
   <aside class="side">
     <div class="brand">
       <div class="logo"><svg viewBox="0 0 24 24" fill="none" stroke="#3a2600" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg></div>
-      <div><b>لوحة المشرف</b><small id="sideInst"></small></div>
+      <div><div class="side-logos"><img src="assets/logo-university.png" alt=""><img src="assets/logo-department.png" alt=""><img src="assets/logo-faculty.png" alt=""></div><b>لوحة المشرف</b><small id="sideInst"></small></div>
     </div>
     <button class="nav-btn act" data-tab="live">📡 المتابعة المباشرة <span class="cnt hidden" id="alertCnt">0</span></button>
     <button class="nav-btn" data-tab="exams">🗂️ المواد والاختبارات</button>
@@ -44,7 +45,9 @@
     <button class="nav-btn" data-tab="results">📋 النتائج والتصحيح <span class="cnt hidden" id="pendCnt" style="background:var(--info)">0</span></button>
     <button class="nav-btn" data-tab="reports">📊 التقارير والتحليلات</button>
     <button class="nav-btn super-only hidden" data-tab="teachers">🧑‍🏫 المعلمون</button>
+    <button class="nav-btn" data-tab="messages">📨 رسائل الطلاب <span class="cnt hidden" id="msgCnt" style="background:var(--info)">0</span></button>
     <button class="nav-btn" data-tab="settings">⚙️ الإعدادات</button>
+    <button class="nav-btn" data-tab="guide">📘 دليل الاستخدام</button>
     <div class="spacer"></div>
     <div class="tool">🔔 إشعارات سطح المكتب <button class="switch" id="swNotif"></button></div>
     <div class="tool">🔊 صوت التنبيه <button class="switch on" id="swSound"></button></div>
@@ -59,7 +62,9 @@
     <button class="nav-btn" data-tab="results">📋 النتائج</button>
     <button class="nav-btn" data-tab="reports">📊 التقارير</button>
     <button class="nav-btn super-only hidden" data-tab="teachers">🧑‍🏫</button>
+    <button class="nav-btn" data-tab="messages">📨</button>
     <button class="nav-btn" data-tab="settings">⚙️</button>
+    <button class="nav-btn" data-tab="guide">📘</button>
     <button class="nav-btn" id="btnLogoutM">↩️</button>
   </nav>
 
@@ -116,6 +121,8 @@
             <label class="field"><span>وقت محدد لكل سؤال (ثانية)</span><input class="input" id="nPerQ" type="number" min="0" value="0" placeholder="0 = بدون"></label>
             <label class="field"><span>المراقبة بالكاميرا</span><select class="input" id="nCam"><option value="1">مفعّلة — تصوير الطالب كدليل</option><option value="0">بدون كاميرا</option></select></label>
             <label class="field"><span>كشف الوجه بالذكاء الاصطناعي</span><select class="input" id="nFace"><option value="1">مفعّل (غياب / أكثر من شخص / النظر بعيدًا)</option><option value="0">غير مفعّل</option></select></label>
+            <label class="field"><span>📍 مكان أداء الاختبار</span><select class="input" id="nGeo"><option value="1">داخل الكلية فقط</option><option value="0">من أي مكان</option></select></label>
+            <label class="field"><span>نطاق السماح حول الكلية (متر)</span><input class="input" id="nRadius" type="number" min="50" max="5000" value="300"></label>
           </div>
           <div class="drop" id="drop">
             <input type="file" id="nFile" accept=".docx,.xlsx,.xls,.csv">
@@ -223,6 +230,18 @@
         </div></div>
         <div class="panel"><div class="panel-h"><h3>المعلمون المسجلون</h3></div><div id="teacherList"></div></div>
       </div>
+    </section>
+
+    <!-- ========== رسائل الطلاب ========== -->
+    <section class="tab hidden" id="tab-messages">
+      <div class="ahead"><div><h1>رسائل الطلاب</h1><p>الاستفسارات والمشكلات التي يرسلها الطلاب من داخل المنصة بعد تسجيل دخولهم</p></div>
+        <div class="toolbar"><select class="input" id="mFilter" style="min-width:150px"><option value="">كل الرسائل</option><option value="unread">غير المقروءة</option></select><button class="btn ghost" id="btnReadAll">✓ تمييز الكل كمقروء</button></div></div>
+      <div class="panel"><div id="msgList"></div></div>
+    </section>
+
+    <!-- ========== دليل الاستخدام ========== -->
+    <section class="tab hidden" id="tab-guide">
+      <div class="panel guide-card" id="adminGuide"></div>
     </section>
 
     <!-- ========== الإعدادات ========== -->
