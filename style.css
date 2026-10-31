@@ -927,3 +927,39 @@ input,select,textarea{font-size:16px}
 @keyframes tmBlink{50%{opacity:.45}}
 @media (max-width:600px){.time-alert{top:calc(env(safe-area-inset-top,0px) + 8px);padding:.7rem .8rem}.time-alert .ta-txt b{font-size:.98rem}.time-alert .ta-txt small{font-size:.8rem}}
 @media (prefers-reduced-motion:reduce){.time-alert,.time-alert .ta-ic,.time-alert.low,.side-timer.low .big-timer,#timer.low{animation:none;transition:none}}
+
+.login-links{display:flex;gap:.5rem;justify-content:center;align-items:center;flex-wrap:wrap}
+.link-btn{background:none;border:0;color:var(--primary,#1e3a8a);font:inherit;font-weight:700;cursor:pointer;padding:0;text-decoration:underline}
+.err.ok-msg{background:#dcfce7;color:#166534;border-color:#86efac}
+
+/* ===== إصلاح القائمة الجانبية للمشرف: لا تخرج عناصرها خارج الخلفية ===== */
+.side{height:100vh;height:100dvh;overflow-y:auto;overflow-x:hidden;scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.18) transparent;align-self:flex-start}
+.side::-webkit-scrollbar{width:6px}
+.side::-webkit-scrollbar-thumb{background:rgba(255,255,255,.18);border-radius:6px}
+.side .spacer{min-height:.6rem}
+.side .tool,.side .me{flex:none}
+.side .me{border-top:1px solid rgba(255,255,255,.1);margin-top:.3rem;padding-top:.7rem}
+@media (max-height:900px){
+  .side{padding:1rem .9rem;gap:.15rem}
+  .side .brand{padding-bottom:.8rem;margin-bottom:.5rem}
+  .side-logos img{width:32px;height:32px}
+  .nav-btn{padding:.55rem .85rem;font-size:.92rem}
+  .side .tool{padding:.4rem .85rem;font-size:.82rem}
+}
+@media (max-height:720px){
+  .nav-btn{padding:.42rem .8rem;font-size:.88rem}
+  .side .brand small{display:none}
+}
+.side .me{word-break:normal;opacity:.75;line-height:1.6}
+.side .me .me-mail{display:block;opacity:.8;font-size:.74rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:right;direction:ltr;unicode-bidi:plaintext}
+
+/* ===== شريط المستخدم أعلى لوحة المشرف ===== */
+.user-bar{display:flex;align-items:center;justify-content:space-between;gap:1rem;margin:-.4rem 0 1.1rem;padding:.55rem .7rem .55rem .9rem;background:#fff;border:1px solid var(--line,#e5e9f2);border-radius:16px;box-shadow:0 6px 18px -12px rgba(13,27,61,.35)}
+.ub-who{display:flex;align-items:center;gap:.7rem;min-width:0}
+.ub-av{width:40px;height:40px;border-radius:50%;flex:none;display:grid;place-items:center;font-family:var(--display);font-weight:800;font-size:1.1rem;color:var(--ink);background:linear-gradient(135deg,var(--gold-2,#f5c96a),var(--gold,#e8a530))}
+.ub-who b{display:block;font-family:var(--display);color:var(--ink);font-size:1rem;line-height:1.3}
+.ub-who small{display:block;color:var(--muted);font-size:.78rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ub-out{flex:none;border:1px solid #fecdd3;background:#fff1f2;color:#be123c;font:inherit;font-weight:700;font-size:.88rem;padding:.5rem 1rem;border-radius:999px;cursor:pointer;transition:all .15s}
+.ub-out:hover{background:#be123c;color:#fff;border-color:#be123c}
+@media (max-width:600px){.user-bar{padding:.45rem .55rem}.ub-av{width:34px;height:34px;font-size:.95rem}.ub-who small{display:none}.ub-out{padding:.42rem .75rem;font-size:.8rem}}
+@media print{.user-bar{display:none!important}}

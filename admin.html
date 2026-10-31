@@ -25,7 +25,7 @@
     <label class="field"><span>كلمة المرور</span><input class="input" id="lPass" type="password" dir="ltr" required></label>
     <div class="err hidden" id="lErr"></div>
     <button class="btn primary lg block" id="lBtn">دخول</button>
-    <p class="center"><a class="back-home" href="index.html">← الصفحة الرئيسية</a></p>
+    <p class="center login-links"><button type="button" class="link-btn" id="lForgot">نسيت كلمة المرور؟</button> · <a class="back-home" href="index.html">← الصفحة الرئيسية</a></p>
     <p class="credits in-login">© 2026 All Rights Reserved — Designed &amp; Developed by Dr. Alaa Dawood</p>
   </form>
 </div>
@@ -69,6 +69,10 @@
   </nav>
 
   <main class="amain">
+    <div class="user-bar" id="userBar">
+      <div class="ub-who"><span class="ub-av" id="ubAv">ع</span><div><b id="ubName"></b><small id="ubRole"></small></div></div>
+      <button class="ub-out" id="btnLogoutTop" type="button">↩️ تسجيل الخروج</button>
+    </div>
 
     <!-- ========== المتابعة ========== -->
     <section class="tab" id="tab-live">

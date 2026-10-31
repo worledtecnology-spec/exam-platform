@@ -1,9 +1,9 @@
 import { initializeApp, deleteApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getFirestore, collection, doc, getDoc, getDocs, setDoc, onSnapshot, writeBatch, updateDoc, deleteDoc, serverTimestamp, query, where }
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut, createUserWithEmailAndPassword }
+import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut, createUserWithEmailAndPassword, sendPasswordResetEmail }
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-import { firebaseConfig, SETTINGS, SUPER_ADMINS } from "./config.js";
+import { firebaseConfig, SETTINGS, SUPER_ADMINS, SUPER_NAME } from "./config.js";
 import { isConfigured, esc, fmtDateTime, fmtTime, mmss, LETTERS, frameGuard, initAppCheck, sid, num, normalizeName } from "./common.js";
 import { parseWordText, parseRows, wordHtmlToText, TYPE_LABEL, LEVEL_LABEL, splitAccepted, normAr } from "./parser.js";
 import { questionsOf, answerText, correctText, isAnswered } from "./scoring.js";
@@ -31,15 +31,51 @@ const isMine = e => S.me.isSuper || (e && e.owner === S.me.email);
 const visibleExams = () => Object.values(S.exams).filter(isMine).sort((a, b) => (b.createdAtMs || 0) - (a.createdAtMs || 0));
 
 // ======================================================= auth + الصلاحيات
+$("lForgot").onclick = async () => {
+  const er = $("lErr"), em = $("lEmail").value.trim();
+  if (!em) { er.textContent = "اكتب بريدك الإلكتروني أولًا ثم اضغط «نسيت كلمة المرور؟»."; er.classList.remove("hidden"); return; }
+  try {
+    auth.languageCode = "ar";
+    await sendPasswordResetEmail(auth, em);
+    er.innerHTML = "✅ تم إرسال رابط تعيين كلمة مرور جديدة إلى بريدك — افتحه (راجع الـ Spam أيضًا) ثم ادخل بكلمة المرور الجديدة.";
+    er.classList.add("ok-msg");
+  } catch (err) { er.textContent = "تعذّر الإرسال" + (err && err.code ? `  [${err.code}]` : ""); er.classList.remove("ok-msg"); }
+  er.classList.remove("hidden");
+};
 $("loginForm").onsubmit = async e => {
-  e.preventDefault(); const er = $("lErr"); er.classList.add("hidden");
+  e.preventDefault(); const er = $("lErr"); er.classList.add("hidden"); er.classList.remove("ok-msg");
   $("lBtn").disabled = true; $("lBtn").textContent = "جارٍ الدخول…";
   try { await signInWithEmailAndPassword(auth, $("lEmail").value.trim(), $("lPass").value); }
-  catch { er.textContent = "البريد أو كلمة المرور غير صحيحة."; er.classList.remove("hidden"); }
+  catch (err) {
+    const c = (err && err.code) || "";
+    const M = {
+      "auth/invalid-credential": "البريد أو كلمة المرور غير صحيحة — أو الحساب غير موجود في Firebase ← Authentication ← Users.",
+      "auth/wrong-password": "كلمة المرور غير صحيحة.",
+      "auth/user-not-found": "هذا البريد غير مسجّل في Firebase ← Authentication ← Users.",
+      "auth/invalid-email": "صيغة البريد غير صحيحة.",
+      "auth/operation-not-allowed": "طريقة الدخول بالبريد وكلمة المرور غير مفعّلة: Firebase ← Authentication ← Sign-in method ← Email/Password ← Enable.",
+      "auth/configuration-not-found": "خدمة Authentication غير مفعّلة في مشروع Firebase: افتح Authentication واضغط Get started ثم فعّل Email/Password.",
+      "auth/unauthorized-domain": "دومين الموقع غير مضاف: Firebase ← Authentication ← Settings ← Authorized domains ← أضف دومين GitHub Pages.",
+      "auth/too-many-requests": "محاولات كثيرة — انتظر بضع دقائق أو أعد تعيين كلمة المرور من Firebase.",
+      "auth/network-request-failed": "مشكلة في الاتصال بالإنترنت أو أن متصفحك يحجب Firebase.",
+      "auth/user-disabled": "هذا الحساب موقوف من Firebase ← Authentication ← Users.",
+      "auth/api-key-not-valid.-please-pass-a-valid-api-key.": "مفتاح apiKey في config.js غير صحيح.",
+      "auth/firebase-app-check-token-is-invalid.": "App Check مفعّل بدون مفتاح صحيح في config.js — عطّل Enforcement لـ Authentication في App Check."
+    };
+    er.textContent = (M[c] || "تعذّر الدخول") + (c ? `  [${c}]` : "");
+    er.classList.remove("hidden"); console.error(err);
+  }
   finally { $("lBtn").disabled = false; $("lBtn").textContent = "دخول"; }
 };
 const logout = () => signOut(auth);
-$("btnLogout").onclick = logout; $("btnLogoutM").onclick = logout;
+$("btnLogout").onclick = logout; $("btnLogoutM").onclick = logout; $("btnLogoutTop").onclick = logout;
+function renderMe() {
+  const role = S.me.isSuper ? "مشرف رئيسي" : "معلم";
+  $("meEmail").innerHTML = `${esc(S.me.name)}<span class="role-tag">${role}</span><span class="me-mail" dir="ltr">${esc(S.me.email)}</span>`;
+  $("ubName").textContent = S.me.name; $("ubRole").textContent = `${role} • ${S.me.email}`;
+  const parts = String(S.me.name).replace(/^(د\.|أ\.د\.|أ\.|م\.)\s*/, "").trim();
+  $("ubAv").textContent = parts.charAt(0) || "👤";
+}
 
 onAuthStateChanged(auth, async user => {
   unsubs.forEach(u => u()); unsubs = [];
@@ -52,8 +88,8 @@ onAuthStateChanged(auth, async user => {
     view("vLogin"); const er = $("lErr"); er.textContent = "هذا الحساب غير مسجل كمشرف أو معلم في المنصة."; er.classList.remove("hidden");
     return signOut(auth);
   }
-  Object.assign(S.me, { email, isSuper, name: prof?.name || (isSuper ? "المشرف الرئيسي" : email), tgChat: prof?.tgChat || "" });
-  $("meEmail").innerHTML = `${esc(S.me.name)}<span class="role-tag">${isSuper ? "مشرف رئيسي" : "معلم"}</span><br>${esc(email)}`;
+  Object.assign(S.me, { email, isSuper, name: prof?.name || (isSuper ? (SUPER_NAME || "المشرف الرئيسي") : email), tgChat: prof?.tgChat || "" });
+  renderMe();
   document.querySelectorAll(".super-only").forEach(x => x.classList.toggle("hidden", !isSuper));
   $("sName").value = S.me.name; $("sChat").value = S.me.tgChat;
   $("tgState").innerHTML = SETTINGS.telegramRelayUrl ? "✓ رابط الإرسال (Relay) مضبوط في config.js" : "⚠️ لم يُضبط <code>telegramRelayUrl</code> في config.js بعد";
@@ -938,7 +974,7 @@ $("btnSaveProfile").onclick = async () => {
   const name = $("sName").value.trim() || S.me.name, tgChat = $("sChat").value.trim();
   try {
     await setDoc(doc(db, "staff", S.me.email), S.me.isSuper ? { name, tgChat, email: S.me.email, role: "super" } : { name, tgChat }, { merge: true });
-    Object.assign(S.me, { name, tgChat });
+    Object.assign(S.me, { name, tgChat }); renderMe();
     const mine = Object.values(S.exams).filter(e => e.owner === S.me.email && (e.notifyChat !== tgChat || e.ownerName !== name));
     if (mine.length) { const b = writeBatch(db); mine.forEach(e => b.update(doc(db, "exams", e.id), { notifyChat: tgChat, ownerName: name })); await b.commit(); }
     toast("ok", "✓ تم الحفظ", mine.length ? `وتم تحديث ${mine.length} اختبار.` : "");

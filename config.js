@@ -16,6 +16,7 @@ export const firebaseConfig = {
 // 2) المشرفون الرئيسيون: الـ UID (من Authentication ← Users) أو البريد — نفس المكتوب في firestore.rules
 //    المشرف الرئيسي يرى كل شيء ويضيف المعلمين. المعلم يرى مواده فقط.
 export const SUPER_ADMINS = ["dralaadawood@gmail.com", "W1OrqQiz3ZRJY0TDzIeYZHGWjkx2"];   // UID أو البريد
+export const SUPER_NAME = "د. علاء داوود";   // الاسم الذي يظهر للمشرف الرئيسي (ويمكن تغييره من «الإعدادات»)
 
 // 3) إعدادات عامة
 export const SETTINGS = {
