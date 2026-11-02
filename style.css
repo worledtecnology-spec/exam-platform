@@ -1037,3 +1037,24 @@ body.app .pl-body{max-height:calc(100dvh - 330px)}
 .sel-col input{width:17px;height:17px;accent-color:var(--danger);cursor:pointer}
 #rBody tr.sel td{background:#fff1f2}
 .row-acts{display:flex;gap:.35rem;align-items:center;justify-content:flex-end;flex-wrap:nowrap}
+
+/* ===== شاشة رمز القاعة ===== */
+.hall-full{position:fixed;inset:0;z-index:400;background:linear-gradient(160deg,#0d1b3d,#1b2d5c);color:#fff;display:flex;flex-direction:column;padding:clamp(14px,3vw,32px);gap:1rem;overflow:auto}
+.hf-top{display:flex;justify-content:space-between;align-items:flex-start;gap:1rem}
+.hf-top small{opacity:.75;font-weight:700}.hf-top h2{font-family:var(--display);font-size:clamp(1.1rem,2.6vw,1.8rem);margin:.2rem 0 0}
+.hf-top .btn{background:rgba(255,255,255,.12);color:#fff;border-color:rgba(255,255,255,.25)}
+.hf-main{flex:1;display:grid;grid-template-columns:1fr minmax(260px,340px);gap:1.4rem;align-items:center}
+.hf-code-wrap{text-align:center;display:flex;flex-direction:column;align-items:center;gap:.9rem}
+.hf-lead{font-size:clamp(1rem,2.2vw,1.5rem);font-weight:700;opacity:.9;margin:0}
+.hf-code{font-family:"Cairo",monospace;font-weight:800;font-size:clamp(4rem,16vw,11rem);letter-spacing:.08em;line-height:1;direction:ltr;background:#fff;color:#0d1b3d;border-radius:28px;padding:.15em .35em;box-shadow:0 30px 60px -20px rgba(0,0,0,.6)}
+.hf-code-wrap.off .hf-code{opacity:.35}
+.hf-bar{width:min(520px,80%);height:10px;border-radius:999px;background:rgba(255,255,255,.18);overflow:hidden}
+.hf-bar i{display:block;height:100%;width:100%;background:linear-gradient(90deg,#f59e0b,#fde68a);transition:width .5s linear}
+.hf-sub{opacity:.8;font-weight:600}
+.hf-side{background:#fff;color:var(--ink);border-radius:20px;padding:1.1rem;display:flex;flex-direction:column;gap:.6rem}
+.hf-side h3{font-family:var(--display);margin:0}.hf-side p{margin:0;color:var(--muted);font-size:.88rem;line-height:1.6}
+.hf-side .field{margin:0}.hf-msg{color:var(--muted);line-height:1.6}
+@media (max-width:860px){.hf-main{grid-template-columns:1fr}}
+.hall-box .hall-in{font-family:"Cairo",monospace;font-size:1.6rem;font-weight:800;letter-spacing:.35em;text-align:center}
+.hall-box small{color:var(--muted);font-weight:500}
+.hf-code{white-space:nowrap;font-size:min(9.5vw,22vh,10rem);letter-spacing:.05em}@media (max-width:860px){.hf-code{font-size:min(17vw,18vh)}}

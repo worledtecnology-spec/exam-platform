@@ -535,7 +535,8 @@ $("btnPublish").onclick = async () => {
       negative: +$("nNeg").value, perQSec: 0, noBack: false, mic: $("nCam").value === "1" && $("nMic").value === "1", seb: $("nSeb").value === "1",
       shuffle: $("nShuffle").value === "1", shuffleOptions: $("nShuffleOpt").value === "1",
       camera: $("nCam").value === "1", faceAI: $("nCam").value === "1" && $("nFace").value === "1", active: true,
-      geoLock: $("nGeo").value === "1", geo: { ...SETTINGS.geoFence, radius: Math.max(50, parseInt($("nRadius").value, 10) || SETTINGS.geoFence.radius) },
+      hallLock: $("nHall").value === "1",
+      geoLock: $("nGeo").value === "1", geo: { ...SETTINGS.geoFence, radius: Math.max(20, parseInt($("nRadius").value, 10) || SETTINGS.geoFence.radius) },
       rosterId: $("nRoster").value || "", owner: S.me.email, ownerName: S.me.name, notifyChat: S.me.tgChat || "",
       qCount: questions.length, totalPoints: questions.reduce((s, q) => s + q.points, 0),
       createdAt: serverTimestamp(), createdAtMs: Date.now()
@@ -566,12 +567,13 @@ function renderExams() {
     const n = e.drawCount ? `${e.drawCount} من ${e.qCount}` : e.qCount || e.questions.length;
     return `<div class="ecard ${e.active ? "on" : ""}">
       <div class="course">${esc(e.course)}${S.me.isSuper && e.ownerName ? ` <small style="color:var(--muted);font-weight:600">• ${esc(e.ownerName)}</small>` : ""}</div><h4>${esc(e.title)}</h4>
-      <div class="row"><span class="chip blue">📝 ${n} سؤال</span><span class="chip blue">⏱️ ${e.duration} د</span><span class="chip blue">✔ ${e.passMark || 50}%</span>${e.camera ? `<span class="chip">📷${e.faceAI ? " 🤖" : ""}</span>` : ""}${e.geoLock ? `<span class="chip">📍 داخل الكلية</span>` : ""}${e.rosterId ? `<span class="chip">👥 ${esc(S.rosters[e.rosterId]?.name || "كشف")}</span>` : ""}${e.negative ? `<span class="chip">➖ سالب</span>` : ""}${e.camera && e.mic !== false ? `<span class="chip">🎙️ رصد الكلام</span>` : ""}${e.seb ? `<span class="chip">🔒 متصفح آمن</span>` : ""}</div>
+      <div class="row"><span class="chip blue">📝 ${n} سؤال</span><span class="chip blue">⏱️ ${e.duration} د</span><span class="chip blue">✔ ${e.passMark || 50}%</span>${e.camera ? `<span class="chip">📷${e.faceAI ? " 🤖" : ""}</span>` : ""}${e.geoLock ? `<span class="chip">📍 ${(e.geo && e.geo.place) ? esc(e.geo.place) : "داخل الكلية"} (${num((e.geo || {}).radius, 300)}م)</span>` : ""}${e.hallLock ? `<span class="chip">🏫 رمز القاعة</span>` : ""}${e.rosterId ? `<span class="chip">👥 ${esc(S.rosters[e.rosterId]?.name || "كشف")}</span>` : ""}${e.negative ? `<span class="chip">➖ سالب</span>` : ""}${e.camera && e.mic !== false ? `<span class="chip">🎙️ رصد الكلام</span>` : ""}${e.seb ? `<span class="chip">🔒 متصفح آمن</span>` : ""}</div>
       <div class="row"><span class="badge ${e.active ? "b-ok" : "b-w0"}">${!e.active ? "○ مغلق" : e.groupGate ? `● مفتوح لـ ${(e.openGroups || []).length ? "م " + sortGroups(e.openGroups).join("، ") : "لا مجموعة"}` : "● مفتوح للطلاب"}</span>${windowText(e)}<span class="badge b-w0">👥 ${A.length}</span>${A.some(a => a.violationCount) ? `<span class="badge b-w2">⚠️ ${A.filter(a => a.violationCount).length}</span>` : ""}</div>
       <div class="acts">
         <button class="btn ${e.active ? "ghost" : "ok"} sm" data-act="toggle" data-arg="${esc(e.id)}">${e.active ? "⏸ إغلاق" : "▶ فتح"}</button>
         <button class="btn ${e.groupGate ? "gold" : "ghost"} sm" data-act="groups" data-arg="${esc(e.id)}">👥 المجموعات</button>
         <button class="btn primary sm" data-act="qr" data-arg="${esc(e.id)}">🔗 الرابط و QR</button>
+        <button class="btn gold sm" data-act="hall" data-arg="${esc(e.id)}" title="عرض رمز القاعة وتحديد مكان القاعة">🏫 القاعة</button>
         <button class="btn ghost sm" data-act="edit" data-arg="${esc(e.id)}" title="تعديل الإعدادات ونسبة النجاح">⚙️ تعديل</button>
         <button class="btn ghost sm btn-del" data-act="del" data-arg="${esc(e.id)}" title="حذف الاختبار نهائيًا">🗑 حذف</button>
         <div class="dropdown"><button class="btn ghost sm" data-act="dd" data-this="1">⋯ المزيد</button><div class="dd-menu">
@@ -653,6 +655,59 @@ function renderGroupsModal() {
     save({ openGroups: sortGroups([...next]), ...(next.size ? { active: true } : {}) });
   });
 }
+// ===================== القاعة: رمز متغير يُعرض على شاشة القاعة + قفل الموقع على مكان القاعة
+let hallTimer = 0, hallTick = 0;
+const HALL_SEC = 45;
+const newCode = () => { const a = new Uint32Array(1); crypto.getRandomValues(a); return String(a[0] % 1000000).padStart(6, "0"); };
+window.__hall = async id => {
+  const e = S.exams[id];
+  const f = document.createElement("div"); f.className = "hall-full";
+  f.innerHTML = `<div class="hf-top"><div><small>🏫 رمز دخول القاعة</small><h2>${esc(e.course)} — ${esc(e.title)}</h2></div><button class="btn ghost sm" id="hfClose">✕ إغلاق</button></div>
+    <div class="hf-main">
+      <div class="hf-code-wrap ${e.hallLock ? "" : "off"}">
+        <p class="hf-lead">${e.hallLock ? "اكتب الرمز ده في خانة «رمز القاعة» عشان تدخل الاختبار" : "رمز القاعة غير مفعّل لهذا الاختبار"}</p>
+        <div class="hf-code" id="hfCode">${e.hallLock ? "······" : "—"}</div>
+        <div class="hf-bar"><i id="hfBar"></i></div><small class="hf-sub" id="hfSub">${e.hallLock ? "جارٍ التجهيز…" : ""}</small>
+        ${e.hallLock ? "" : `<button class="btn gold" id="hfEnable">🏫 تفعيل رمز القاعة لهذا الاختبار</button>`}
+      </div>
+      <div class="hf-side">
+        <h3>📍 مكان الاختبار</h3>
+        <p>قف داخل القاعة واضغط الزر — المنصة تقفل الاختبار على مكانك الحالي بنصف القطر اللي تختاره.</p>
+        <label class="field"><span>اسم القاعة</span><input class="input" id="hfPlace" value="${esc((e.geo && e.geo.place) || "")}" placeholder="مثلًا: معمل 3 — الدور الثاني"></label>
+        <label class="field"><span>نصف القطر المسموح</span><select class="input" id="hfR">${[20, 30, 50, 80, 150, 300].map(r => `<option value="${r}" ${num((e.geo || {}).radius, 300) == r ? "selected" : ""}>${r} متر${r <= 30 ? " (قاعة صغيرة)" : r <= 80 ? " (قاعة / مدرج)" : r === 300 ? " (الكلية كلها)" : ""}</option>`).join("")}</select></label>
+        <button class="btn primary" id="hfHere">📍 اجعل موقعي الحالي هو مكان الاختبار</button>
+        <small id="hfMsg" class="hf-msg">${e.geoLock ? `مفعّل حاليًا: ${esc((e.geo && e.geo.place) || "الكلية")} — ${num((e.geo || {}).radius, 300)} متر` : "قفل المكان غير مفعّل لهذا الاختبار"}</small>
+      </div>
+    </div>`;
+  document.body.appendChild(f);
+  document.documentElement.requestFullscreen?.().catch(() => { });
+  const stop = () => { clearInterval(hallTimer); clearInterval(hallTick); f.remove(); if (document.fullscreenElement) document.exitFullscreen().catch(() => { }); };
+  f.querySelector("#hfClose").onclick = stop;
+  f.querySelector("#hfEnable")?.addEventListener("click", async () => { try { await updateDoc(doc(db, "exams", id), { hallLock: true }); S.exams[id].hallLock = true; stop(); window.__hall(id); } catch (err) { permError(err); } });
+  f.querySelector("#hfHere").onclick = () => {
+    const msg = f.querySelector("#hfMsg"); msg.textContent = "جارٍ تحديد موقعك بدقة… (استنى ثواني)";
+    navigator.geolocation.getCurrentPosition(async p => {
+      const r = +f.querySelector("#hfR").value, acc = Math.round(p.coords.accuracy);
+      const geo = { ...SETTINGS.geoFence, ...(e.geo || {}), lat: +p.coords.latitude.toFixed(6), lng: +p.coords.longitude.toFixed(6), radius: r, place: f.querySelector("#hfPlace").value.trim().slice(0, 60), name: f.querySelector("#hfPlace").value.trim().slice(0, 60) || SETTINGS.geoFence.name, maxAccuracy: Math.max(150, r * 3) };
+      try { await updateDoc(doc(db, "exams", id), { geoLock: true, geo }); Object.assign(S.exams[id], { geoLock: true, geo }); msg.innerHTML = `✓ تم — الاختبار مقفول على <b>${esc(geo.place || "مكانك الحالي")}</b> بنصف قطر ${r} متر. دقة تحديد موقعك ≈ ${acc} متر${acc > 40 ? " — <b>الدقة ضعيفة: اقترب من شباك وأعد المحاولة</b>" : ""}.`; renderExams(); }
+      catch (err) { permError(err); }
+    }, () => { msg.textContent = "تعذّر تحديد موقعك — اسمح للمتصفح بالوصول للموقع وشغّل الـ GPS / الواي فاي."; }, { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 });
+  };
+  if (!e.hallLock) return;
+  let code = "", prev = "", t0 = 0;
+  const rotate = async () => {
+    prev = code || newCode(); code = newCode(); t0 = Date.now();
+    try { await setDoc(doc(db, "hallCodes", id), { code, prev, at: serverTimestamp(), owner: e.owner || S.me.email }); f.querySelector("#hfCode").textContent = code.slice(0, 3) + " " + code.slice(3); }
+    catch (err) { f.querySelector("#hfSub").textContent = "⚠️ تعذّر حفظ الرمز — تأكد من نشر firestore.rules الجديدة"; permError(err); }
+  };
+  await rotate();
+  hallTimer = setInterval(rotate, HALL_SEC * 1000);
+  hallTick = setInterval(() => {
+    const left = Math.max(0, HALL_SEC - Math.floor((Date.now() - t0) / 1000));
+    f.querySelector("#hfBar").style.width = (left / HALL_SEC * 100) + "%";
+    f.querySelector("#hfSub").textContent = `الرمز بيتغير بعد ${left} ثانية — سيب الشاشة دي مفتوحة طول ما الطلاب بيدخلوا`;
+  }, 500);
+};
 window.__toggle = async id => { try { await updateDoc(doc(db, "exams", id), { active: !S.exams[id].active }); } catch (e) { permError(e); } };
 window.__report = id => { $("repExam").value = id; document.querySelector('.side [data-tab="reports"]').click(); };
 window.__sheet = async id => {
@@ -709,7 +764,8 @@ window.__edit = id => {
       <label class="field"><span>🔒 المتصفح الآمن SEB</span><select class="input" id="eSeb">${sel(e.seb, "إلزامي على الأجهزة المدعومة", "غير مطلوب")}</select></label>
       <label class="field"><span>كشف الوجه</span><select class="input" id="eFace">${sel(e.faceAI, "مفعّل", "غير مفعّل")}</select></label>
       <label class="field"><span>📍 مكان أداء الاختبار</span><select class="input" id="eGeo">${sel(e.geoLock, "داخل الكلية فقط", "من أي مكان")}</select></label>
-      <label class="field"><span>نطاق السماح (متر)</span><input class="input" id="eRadius" type="number" min="50" max="5000" value="${num((e.geo || SETTINGS.geoFence).radius, 300)}"></label>
+      <label class="field"><span>🏫 رمز القاعة</span><select class="input" id="eHall">${sel(e.hallLock, "مطلوب", "غير مطلوب")}</select></label>
+      <label class="field"><span>نطاق السماح (متر)</span><input class="input" id="eRadius" type="number" min="20" max="5000" value="${num((e.geo || SETTINGS.geoFence).radius, 300)}"></label>
       <label class="field"><span>خط العرض (Latitude)</span><input class="input" id="eLat" dir="ltr" value="${num((e.geo || SETTINGS.geoFence).lat)}"></label>
       <label class="field"><span>خط الطول (Longitude)</span><input class="input" id="eLng" dir="ltr" value="${num((e.geo || SETTINGS.geoFence).lng)}"></label>
       <div class="field" style="grid-column:1/-1"><button class="btn ghost sm" id="eHere" type="button">📍 اجعل موقعي الحالي هو مركز الكلية</button> <a class="btn ghost sm" id="eMap" target="_blank" rel="noopener" href="https://www.google.com/maps?q=${num((e.geo || SETTINGS.geoFence).lat)},${num((e.geo || SETTINGS.geoFence).lng)}">🗺 عرض على الخريطة</a><small id="eHereMsg" style="color:var(--muted);display:block;margin-top:.4rem">نصيحة: افتح هذه الشاشة وأنت داخل الكلية واضغط الزر لتحديد المركز بدقة.</small></div>
@@ -734,8 +790,8 @@ window.__edit = id => {
         drawCount: Math.max(0, parseInt($("eDraw").value, 10) || 0), perQSec: 0, negative: +$("eNeg").value,
         noBack: false, mic: $("eCam").value === "1" && $("eMic").value === "1", seb: $("eSeb").value === "1", shuffle: $("eSh").value === "1", shuffleOptions: $("eShO").value === "1",
         camera: $("eCam").value === "1", faceAI: $("eCam").value === "1" && $("eFace").value === "1", rosterId: $("eRoster").value || "", active: $("eAct").value === "1",
-        geoLock: $("eGeo").value === "1",
-        geo: { ...SETTINGS.geoFence, ...(e.geo || {}), radius: Math.max(50, parseInt($("eRadius").value, 10) || 300), lat: Number($("eLat").value) || SETTINGS.geoFence.lat, lng: Number($("eLng").value) || SETTINGS.geoFence.lng }
+        geoLock: $("eGeo").value === "1", hallLock: $("eHall").value === "1",
+        geo: { ...SETTINGS.geoFence, ...(e.geo || {}), radius: Math.max(20, parseInt($("eRadius").value, 10) || 300), lat: Number($("eLat").value) || SETTINGS.geoFence.lat, lng: Number($("eLng").value) || SETTINGS.geoFence.lng }
       });
       closeModal(); toast("ok", "✓ تم الحفظ", e.title);
     } catch (err) { permError(err); }
@@ -781,7 +837,7 @@ window.__del = async id => {
   if (!confirm(`حذف «${e.title}» نهائيًا${A.length ? ` مع نتائج وأدلة ${A.length} طالب` : ""}؟\nلا يمكن التراجع. (يمكنك بدلًا من ذلك «إغلاق» الاختبار)`)) return;
   try {
     await deleteAttempts(A);
-    const refs = [doc(db, "exams", id), doc(db, "keys", id), doc(db, "examQuestions", id)];
+    const refs = [doc(db, "exams", id), doc(db, "keys", id), doc(db, "examQuestions", id), doc(db, "hallCodes", id)];
     const locks = await getDocs(query(collection(db, "deviceLocks"), where("examId", "==", id))).catch(() => ({ forEach() { } }));
     locks.forEach(l => refs.push(l.ref));
     [...new Set(e.questions.filter(q => q.img != null).map(q => q.img))].forEach(m => refs.push(doc(db, "media", String(m))));

@@ -103,7 +103,9 @@ function onExamChange() {
   $("modeRoster").classList.toggle("hidden", !roster);
   $("modeOpen").classList.toggle("hidden", roster);
   seatInfo = null; $("seatCard").classList.add("hidden");
+  $("hallBox").classList.toggle("hidden", !(e && e.hallLock));
 }
+$("inHall").addEventListener("input", e => { e.target.value = toLatin(e.target.value).replace(/\D/g, "").slice(0, 6); });
 $("inExam").onchange = onExamChange;
 
 // ---- البحث برقم الجلوس
@@ -191,6 +193,18 @@ $("btnNext").onclick = async () => {
   if (!e.active) return loginError("هذا الاختبار مغلق الآن.");
   if (e.groupGate && !(e.openGroups || []).map(String).includes(String(me.group)))
     return loginError(`⏳ الاختبار غير مفتوح للمجموعة ${me.group} الآن. انتظر حتى يفتحه المشرف لمجموعتك ثم اضغط «متابعة» مرة أخرى.`);
+  // رمز القاعة: لا يدخل إلا من يرى الرمز المعروض داخل القاعة (يتغير كل 45 ثانية ويتحقق منه Firebase)
+  if (e.hallLock) {
+    const code = toLatin($("inHall").value.trim());
+    if (!/^\d{6}$/.test(code)) return loginError("اكتب رمز القاعة (6 أرقام) المعروض الآن على شاشة القاعة.");
+    const pref = doc(db, "hallPass", exId + "_" + deviceId);
+    let okPass = false;
+    try { const ex0 = await getDoc(pref); okPass = ex0.exists() && ex0.data().code === code; } catch { /* */ }
+    if (!okPass) {
+      try { await setDoc(pref, { examId: exId, uid: deviceId, code, name: me.name, group: me.group, at: serverTimestamp() }); }
+      catch (err) { console.warn(err); return loginError("⛔ رمز القاعة غير صحيح أو انتهت صلاحيته — اكتب الرمز المعروض حاليًا على شاشة القاعة (بيتغير كل 45 ثانية)."); }
+    }
+  }
   // المتصفح الآمن: إلزامي على الأجهزة التي تدعمه، والباقي يكمل بالمراقبة المشددة
   if (e.seb && sebSupported() && !inSEB()) return showSEB(exId);
 

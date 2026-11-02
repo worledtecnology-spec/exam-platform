@@ -10,7 +10,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@600;700;800&family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=20261103a">
+<link rel="stylesheet" href="style.css?v=20261103b">
 </head>
 <body class="no-select app">
 
@@ -69,6 +69,10 @@
         <select class="input" id="inGroup"></select></label>
     </div>
 
+    <div id="hallBox" class="hall-box hidden">
+      <label class="field"><span>🏫 رمز القاعة <small>(الرقم المعروض الآن على شاشة القاعة)</small></span>
+        <input class="input hall-in" id="inHall" inputmode="numeric" autocomplete="off" maxlength="6" placeholder="● ● ● ● ● ●" dir="ltr"></label>
+    </div>
     <div class="loc wait" id="locBox"><div class="pin">📍</div><div><div class="t">جارٍ تحديد موقعك تلقائيًا…</div><div class="d">اسمح للمتصفح بالوصول إلى الموقع عند ظهور الطلب</div></div></div>
     <div class="err hidden" id="loginErr"></div>
     <button class="btn primary lg block" id="btnNext">متابعة ←</button>
@@ -272,6 +276,6 @@
 <div class="s-toast hidden" id="sToast"></div>
 <div class="time-alert hidden" id="timeAlert" role="alert" aria-live="assertive"><span class="ta-ic">⏰</span><div class="ta-txt"><b id="taTitle"></b><small id="taSub"></small></div><button type="button" class="ta-x" id="taClose" aria-label="إغلاق">✕</button></div>
 
-<script type="module" src="student.js?v=20261103a"></script>
+<script type="module" src="student.js?v=20261103b"></script>
 </body>
 </html>

@@ -100,6 +100,7 @@ service cloud.firestore {
           && examOpen(d.examId)
           && d.owner == e.owner
           && (e.get('groupGate', false) != true || d.group in e.get('openGroups', []))
+          && (e.get('hallLock', false) != true || exists(/databases/$(database)/documents/hallPass/$(d.examId + '_' + request.auth.uid)))
           && d.status == 'in_progress' && d.violationCount == 0 && d.restarts == 0 && d.flagCount == 0
           && d.startedAt == request.time
           && d.durationMin == e.duration
@@ -192,6 +193,29 @@ service cloud.firestore {
       allow read, delete: if isSuper() || (isStaff() && resource.data.owner == email());
       allow update: if (isSuper() || (isStaff() && resource.data.owner == email()))
                     && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read']);
+    }
+
+    // ---------------- رمز القاعة: المشرف يعرضه داخل القاعة ويتغير كل 45 ثانية — الطلاب لا يستطيعون قراءته
+    match /hallCodes/{eid} {
+      allow read, delete: if ownsExam(eid);
+      allow create, update: if ownsExam(eid)
+        && request.resource.data.code is string && request.resource.data.code.matches('^[0-9]{6}$')
+        && request.resource.data.prev is string && request.resource.data.at == request.time;
+    }
+    // تصريح دخول القاعة: يُنشأ فقط إذا كتب الطالب الرمز الحالي (أو السابق مباشرة) خلال دقيقتين من عرضه
+    match /hallPass/{pid} {
+      function hc(eid) { return get(/databases/$(database)/documents/hallCodes/$(eid)).data; }
+      allow get: if signedIn() && resource.data.uid == request.auth.uid;
+      allow list, delete: if isStaff();
+      allow create, update: if signedIn()
+        && request.resource.data.keys().hasOnly(['examId', 'uid', 'code', 'name', 'group', 'at'])
+        && request.resource.data.uid == request.auth.uid
+        && pid == request.resource.data.examId + '_' + request.auth.uid
+        && request.resource.data.at == request.time
+        && request.resource.data.code is string && request.resource.data.code.matches('^[0-9]{6}$')
+        && exists(/databases/$(database)/documents/hallCodes/$(request.resource.data.examId))
+        && (hc(request.resource.data.examId).code == request.resource.data.code || hc(request.resource.data.examId).prev == request.resource.data.code)
+        && request.time < hc(request.resource.data.examId).at + duration.value(2, 'm');
     }
 
     // ---------------- قفل الجهاز: لا يدخل أكثر من طالب من نفس الجهاز
