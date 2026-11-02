@@ -99,6 +99,7 @@ service cloud.firestore {
           && id.matches('^[A-Za-z0-9_-]{6,160}$')
           && examOpen(d.examId)
           && d.owner == e.owner
+          && (e.get('groupGate', false) != true || d.group in e.get('openGroups', []))
           && d.status == 'in_progress' && d.violationCount == 0 && d.restarts == 0 && d.flagCount == 0
           && d.startedAt == request.time
           && d.durationMin == e.duration

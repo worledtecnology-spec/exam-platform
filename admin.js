@@ -180,6 +180,7 @@ setInterval(() => { if (curTab() === "live") { renderRunning(); renderRequests()
 
 function renderAll() {
   renderStats(); renderRunning(); renderRequests(); renderFeed(); renderExams(); updatePending();
+  if (groupsModalId) renderGroupsModal();
   if (curTab() === "results") renderResults();
   if (curTab() === "reports") { clearTimeout(repTimer); repTimer = setTimeout(() => { if (!document.querySelector("#ppOut")) renderReports(); }, 1200); }
 }
@@ -558,9 +559,10 @@ function renderExams() {
     return `<div class="ecard ${e.active ? "on" : ""}">
       <div class="course">${esc(e.course)}${S.me.isSuper && e.ownerName ? ` <small style="color:var(--muted);font-weight:600">• ${esc(e.ownerName)}</small>` : ""}</div><h4>${esc(e.title)}</h4>
       <div class="row"><span class="chip blue">📝 ${n} سؤال</span><span class="chip blue">⏱️ ${e.duration} د</span><span class="chip blue">✔ ${e.passMark || 50}%</span>${e.camera ? `<span class="chip">📷${e.faceAI ? " 🤖" : ""}</span>` : ""}${e.geoLock ? `<span class="chip">📍 داخل الكلية</span>` : ""}${e.rosterId ? `<span class="chip">👥 ${esc(S.rosters[e.rosterId]?.name || "كشف")}</span>` : ""}${e.negative ? `<span class="chip">➖ سالب</span>` : ""}${e.noBack || e.perQSec ? `<span class="chip">🔒 بلا رجوع</span>` : ""}</div>
-      <div class="row"><span class="badge ${e.active ? "b-ok" : "b-w0"}">${e.active ? "● مفتوح للطلاب" : "○ مغلق"}</span>${windowText(e)}<span class="badge b-w0">👥 ${A.length}</span>${A.some(a => a.violationCount) ? `<span class="badge b-w2">⚠️ ${A.filter(a => a.violationCount).length}</span>` : ""}</div>
+      <div class="row"><span class="badge ${e.active ? "b-ok" : "b-w0"}">${!e.active ? "○ مغلق" : e.groupGate ? `● مفتوح لـ ${(e.openGroups || []).length ? "م " + sortGroups(e.openGroups).join("، ") : "لا مجموعة"}` : "● مفتوح للطلاب"}</span>${windowText(e)}<span class="badge b-w0">👥 ${A.length}</span>${A.some(a => a.violationCount) ? `<span class="badge b-w2">⚠️ ${A.filter(a => a.violationCount).length}</span>` : ""}</div>
       <div class="acts">
         <button class="btn ${e.active ? "ghost" : "ok"} sm" data-act="toggle" data-arg="${esc(e.id)}">${e.active ? "⏸ إغلاق" : "▶ فتح"}</button>
+        <button class="btn ${e.groupGate ? "gold" : "ghost"} sm" data-act="groups" data-arg="${esc(e.id)}">👥 المجموعات</button>
         <button class="btn primary sm" data-act="qr" data-arg="${esc(e.id)}">🔗 الرابط و QR</button>
         <div class="dropdown"><button class="btn ghost sm" data-act="dd" data-this="1">⋯ المزيد</button><div class="dd-menu">
           <button data-act="openKey" data-arg="${esc(e.id)}">🔑 مفتاح الإجابة / إلغاء سؤال</button>
@@ -572,8 +574,65 @@ function renderExams() {
       </div></div>`;
   }).join("") : `<div class="panel" style="grid-column:1/-1"><div class="empty"><div class="e-ic">📭</div>لم تنشر أي اختبار بعد — ارفع ملف الأسئلة بالأعلى</div></div>`;
 }
-window.__dd = btn => { const d = btn.parentElement; const open = !d.classList.contains("open"); document.querySelectorAll(".dropdown.open").forEach(x => x.classList.remove("open")); d.classList.toggle("open", open); };
+window.__dd = btn => {
+  const d = btn.parentElement; const open = !d.classList.contains("open");
+  document.querySelectorAll(".dropdown.open").forEach(x => x.classList.remove("open", "up"));
+  d.classList.toggle("open", open);
+  if (open) { // افتح القائمة لأعلى لو مفيش مساحة تحت
+    const m = d.querySelector(".dd-menu"), r = m.getBoundingClientRect();
+    if (r.bottom > innerHeight - 8 && d.getBoundingClientRect().top > r.height + 16) d.classList.add("up");
+  }
+};
 document.addEventListener("click", e => { if (!e.target.closest(".dropdown")) document.querySelectorAll(".dropdown.open").forEach(x => x.classList.remove("open")); });
+// ===================== فتح وغلق الاختبار لكل مجموعة على حدة (بدون مواعيد)
+const sortGroups = g => [...new Set((g || []).map(String))].sort((a, b) => (parseFloat(a) || 0) - (parseFloat(b) || 0) || a.localeCompare(b, "ar"));
+let groupsModalId = null;
+async function examGroups(e) {
+  if (e.rosterId) {
+    const R = await getRoster(e.rosterId);
+    const g = sortGroups(R.map(x => x.group).filter(Boolean));
+    if (g.length) return g;
+  }
+  return Array.from({ length: SETTINGS.groupsCount || 30 }, (_, i) => String(i + 1));
+}
+window.__groups = async id => {
+  groupsModalId = id;
+  $("modalCard").innerHTML = `<div class="mh"><h3 style="font-family:var(--display);color:var(--ink)">👥 فتح وغلق الاختبار للمجموعات</h3><button class="btn ghost sm" id="mClose">✕</button></div><div class="mb"><div class="spinner"></div></div>`;
+  $("modal").classList.remove("hidden"); $("mClose").onclick = () => { groupsModalId = null; closeModal(); };
+  S.groupList = S.groupList || {};
+  S.groupList[id] = await examGroups(S.exams[id]);
+  renderGroupsModal();
+};
+function renderGroupsModal() {
+  const id = groupsModalId, e = id && S.exams[id];
+  if (!e || $("modal").classList.contains("hidden")) { groupsModalId = null; return; }
+  const groups = S.groupList?.[id] || [], open = new Set((e.openGroups || []).map(String));
+  const A = Object.values(S.attempts).filter(a => a.examId === id);
+  const cnt = g => { const x = A.filter(a => String(a.group) === g); return { run: x.filter(a => a.status === "in_progress" || a.status === "suspended").length, done: x.filter(a => a.status === "submitted" || a.status === "locked").length }; };
+  const on = !!e.groupGate;
+  $("modalCard").innerHTML = `<div class="mh"><h3 style="font-family:var(--display);color:var(--ink)">👥 فتح وغلق الاختبار للمجموعات</h3><button class="btn ghost sm" id="mClose">✕</button></div>
+  <div class="mb">
+    <p style="font-weight:700;color:var(--ink);margin-bottom:.6rem">${esc(e.course)} — ${esc(e.title)}</p>
+    <label class="gg-mode ${on ? "on" : ""}"><button type="button" class="switch ${on ? "on" : ""}" id="ggMode" aria-label="التحكم بالمجموعات"></button>
+      <div><b>التحكم بالمجموعات</b><small>${on ? "مفعّل — لا يدخل الاختبار إلا طلاب المجموعات المفتوحة بالأخضر" : "غير مفعّل — الاختبار يُفتح ويُغلق لكل الطلاب معًا بزر «فتح / إغلاق»"}</small></div></label>
+    ${on ? `
+    <div class="gg-bar"><span>مفتوح الآن: <b>${open.size}</b> من ${groups.length}</span>
+      <div class="toolbar"><button class="btn ok sm" id="ggAll">▶ فتح الكل</button><button class="btn ghost sm" id="ggNone">⏸ غلق الكل</button></div></div>
+    <div class="gg-grid">${groups.map(g => { const c = cnt(g), isOn = open.has(g); return `<button type="button" class="gg-tile ${isOn ? "on" : ""}" data-g="${esc(g)}" aria-pressed="${isOn}">
+      <span class="gg-n">م ${esc(g)}</span><span class="gg-s">${isOn ? "● مفتوح" : "○ مغلق"}</span>${c.run || c.done ? `<span class="gg-c">${c.run ? `✍️ ${c.run}` : ""}${c.run && c.done ? " • " : ""}${c.done ? `✓ ${c.done}` : ""}</span>` : ""}</button>`; }).join("")}</div>
+    <p class="gg-note">اضغط على المجموعة لفتحها أو غلقها فورًا. الطالب الذي بدأ الاختبار بالفعل يكمل حتى ينتهي وقته حتى لو أغلقت مجموعته — الغلق يمنع دخول طلاب جدد فقط.</p>` : ""}
+  </div>`;
+  $("mClose").onclick = () => { groupsModalId = null; closeModal(); };
+  const save = async patch => { try { await updateDoc(doc(db, "exams", id), patch); Object.assign(S.exams[id], patch); renderGroupsModal(); renderExams(); } catch (err) { permError(err); } };
+  $("ggMode").onclick = () => save(on ? { groupGate: false } : { groupGate: true, active: true, openGroups: e.openGroups || [] });
+  if (!on) return;
+  $("ggAll").onclick = () => save({ openGroups: groups.slice(), active: true });
+  $("ggNone").onclick = () => save({ openGroups: [] });
+  document.querySelectorAll(".gg-tile").forEach(b => b.onclick = () => {
+    const g = b.dataset.g, next = new Set(open); next.has(g) ? next.delete(g) : next.add(g);
+    save({ openGroups: sortGroups([...next]), ...(next.size ? { active: true } : {}) });
+  });
+}
 window.__toggle = async id => { try { await updateDoc(doc(db, "exams", id), { active: !S.exams[id].active }); } catch (e) { permError(e); } };
 window.__report = id => { $("repExam").value = id; document.querySelector('.side [data-tab="reports"]').click(); };
 window.__sheet = async id => {

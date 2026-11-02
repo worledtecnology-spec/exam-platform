@@ -22,6 +22,11 @@ const reModel = /^(?:الإجابة|الاجابة|الإجابه|الاجابه
 const rePts = /^(?:الدرجة|الدرجه|درجة|درجه|points?|score)\s*[:：\-–=]\s*([\d٠-٩]+(?:[.,][\d٠-٩]+)?)/i;
 const reType = /^(?:النوع|نوع السؤال|type)\s*[:：\-–=]\s*(.+)$/i;
 const reLevel = /^(?:المستوى|المستوي|مستوى|مستوي|الصعوبة|الصعوبه|level)\s*[:：\-–=]\s*(.+)$/i;
+// سطور الشرح/التغذية الراجعة بعد الإجابة: تُتجاهل (لا تُعرض للطالب حتى لا تكشف الإجابة)
+const reExp = /^(?:الشرح|شرح|التفسير|التعليل|التوضيح|توضيح|السبب|ملاحظة|ملاحظه|التغذية الراجعة|التغذيه الراجعه|تغذية راجعة|explanation|feedback)\s*[:：\-–]\s*/i;
+const reExpInline = /\s*(?:الشرح|التفسير|التعليل|التوضيح|التغذية الراجعة|explanation|feedback)\s*[:：].*$/i;
+// رموز زخرفية قد تسبق «الإجابة» مثل ✔ أو ✅ أو ★ أو ►
+const reLead = /^[\s✔✓☑✅✳★☆►▶▷•●▪◆◇➤➜→⇐⇒🔹🔸👉✨*#|]+/u;
 const reQ = /^(?:س|سؤال|q)?\s*[\d٠-٩]+\s*[\-–.\):\/]\s*/i;
 const reOpt = /^[\(\[]?\s*(هـ|[أاإبجدهوزa-fA-F])\s*[\)\]\-–.:]\s*(.+)$/;
 const reBullet = /^(?:[\-•●▪◦*✓]\s*|\(?[\d٠-٩]+\s*[\)\-–.]\s*)/;
@@ -158,8 +163,12 @@ export function parseWordText(raw, images = []) {
   const push = () => { blocks.push(cur); cur = nb(); };
   const tgt = field => (cur.lines.length || !blocks.length || blocks[blocks.length - 1][field] != null) ? cur : blocks[blocks.length - 1];
   const pairCount = b => b.lines.filter(x => x.includes("=")).length;
-  for (const l of lines) {
+  for (let l of lines) {
     let m;
+    const bare = l.replace(reLead, "");
+    if (reAns.test(bare) || reModel.test(bare) || rePts.test(bare) || reType.test(bare) || reLevel.test(bare)) l = bare;
+    if (reExp.test(bare)) continue;            // سطر شرح مستقل
+    if (reAns.test(l)) l = l.replace(reExpInline, ""); // شرح ملتصق بسطر الإجابة
     if ((m = l.match(reModel))) { cur.model = m[1].trim(); cur.type = cur.type || "essay"; push(); continue; }
     if ((m = l.match(reAns))) { cur.answer = m[1].trim(); push(); continue; }
     if ((m = l.match(rePts))) { const t = tgt("points"); t.points = m[1]; continue; }
@@ -255,6 +264,7 @@ export function wordHtmlToText(root) {
   const textOf = (el, skipLists) => [...el.childNodes].map(n => {
     if (n.nodeType === 3) return n.textContent;
     if (n.nodeType !== 1) return "";
+    if (n.nodeName === "BR") return "\n";
     if (n.nodeName === "IMG") { const src = n.getAttribute("src") || ""; if (/^data:image\//.test(src)) { images.push(src); return ` [[IMG:${images.length - 1}]] `; } return ""; }
     if (skipLists && /^(OL|UL)$/.test(n.nodeName)) return "";
     return textOf(n, false);
@@ -271,10 +281,10 @@ export function wordHtmlToText(root) {
       } else if (tag === "TABLE") {
         el.querySelectorAll("tr").forEach(tr => {
           const cells = [...tr.querySelectorAll("td,th")].map(td => textOf(td).trim()).filter(Boolean);
-          if (cells.length === 2 && !cells.some(c => /=/.test(c))) out.push(`${cells[0]} = ${cells[1]}`); else cells.forEach(c => out.push(c));
+          if (cells.length === 2 && !cells.some(c => /=/.test(c))) out.push(`${cells[0]} = ${cells[1]}`); else cells.forEach(c => c.split("\n").forEach(x => x.trim() && out.push(x.trim())));
         });
       } else if (/^(P|H[1-6]|DIV|BLOCKQUOTE)$/.test(tag)) {
-        const t = textOf(el).trim(); if (t) out.push(t);
+        textOf(el).split("\n").forEach(x => { x = x.trim(); if (x) out.push(x); });
       } else walk(el, depth);
     }
   })(root, 0);

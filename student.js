@@ -177,6 +177,11 @@ $("btnNext").onclick = async () => {
     me = { name, group, seat: "" };
   }
   if (SETTINGS.requireLocation && !loc && !e.geoLock) return loginError("يجب السماح بتحديد الموقع لدخول الاختبار.");
+  // فتح الاختبار لمجموعات محددة: نقرأ حالة الاختبار الحالية من القاعدة (قد يكون المشرف فتح/أغلق مجموعة الآن)
+  try { const fr = await getDoc(doc(db, "exams", exId)); if (fr.exists()) Object.assign(e, fr.data()); } catch { /* نكمل بآخر نسخة */ }
+  if (!e.active) return loginError("هذا الاختبار مغلق الآن.");
+  if (e.groupGate && !(e.openGroups || []).map(String).includes(String(me.group)))
+    return loginError(`⏳ الاختبار غير مفتوح للمجموعة ${me.group} الآن. انتظر حتى يفتحه المشرف لمجموعتك ثم اضغط «متابعة» مرة أخرى.`);
 
   const btn = $("btnNext"); btn.disabled = true; btn.textContent = "جارٍ التحقق…";
   // الاختبار داخل الكلية فقط: التحقق من موقع الطالب قبل أي شيء
