@@ -9,7 +9,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@600;700;800&family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=20261102e">
+<link rel="stylesheet" href="style.css?v=20261103a">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.8.0/mammoth.browser.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
@@ -187,10 +187,10 @@
             </select>
             <input class="input" id="rSearch" placeholder="🔍 بحث بالاسم أو رقم الجلوس">
           </div>
-          <span class="badge b-w0" id="rCount">0</span>
+          <div class="toolbar"><button class="btn danger sm hidden" id="btnDelSel" type="button">🗑 حذف المحدد (0)</button><span class="badge b-w0" id="rCount">0</span></div>
         </div>
         <div class="tbl-wrap"><table class="tbl"><thead><tr>
-          <th>م</th><th>اسم الطالب</th><th>المجموعة</th><th>المقرر</th><th>الدرجة</th><th>النسبة</th><th>التقدير</th><th>الحالة</th><th>الغش</th><th>الموقع</th><th>التسليم</th><th></th>
+          <th class="sel-col"><input type="checkbox" id="rAll" title="تحديد الكل" aria-label="تحديد الكل"></th><th>م</th><th>اسم الطالب</th><th>المجموعة</th><th>المقرر</th><th>الدرجة</th><th>النسبة</th><th>التقدير</th><th>الحالة</th><th>الغش</th><th>الموقع</th><th>التسليم</th><th></th>
         </tr></thead><tbody id="rBody"></tbody></table></div>
       </div>
     </section>
@@ -275,6 +275,6 @@
 <div class="toasts" id="toasts"></div>
 <div class="overlay hidden" id="modal"><div class="modal-card" id="modalCard"></div></div>
 
-<script type="module" src="admin.js?v=20261102e"></script>
+<script type="module" src="admin.js?v=20261103a"></script>
 </body>
 </html>

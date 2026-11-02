@@ -913,6 +913,37 @@ function currentRows() {
   if (q) R = R.filter(a => (a.name || "").includes(q) || String(a.seat || "").includes(q));
   return R.sort(byName);
 }
+// ---- حذف الطلاب من النتائج (طالب واحد أو المحددين)
+const rSel = new Set();
+function updateSelUI(R) {
+  const ids = new Set((R || currentRows()).map(a => a.id));
+  [...rSel].forEach(id => { if (!ids.has(id) || !S.attempts[id]) rSel.delete(id); });
+  const b = $("btnDelSel"); b.classList.toggle("hidden", !rSel.size); b.textContent = `🗑 حذف المحدد (${rSel.size})`;
+  const all = $("rAll"); all.checked = !!ids.size && [...ids].every(id => rSel.has(id)); all.indeterminate = !all.checked && rSel.size > 0;
+}
+$("rBody").addEventListener("change", e => {
+  const c = e.target.closest(".rChk"); if (!c) return;
+  c.checked ? rSel.add(c.dataset.id) : rSel.delete(c.dataset.id);
+  c.closest("tr").classList.toggle("sel", c.checked); updateSelUI();
+});
+$("rAll").onchange = () => { const R = currentRows(); R.forEach(a => $("rAll").checked ? rSel.add(a.id) : rSel.delete(a.id)); renderResults(); };
+async function removeStudents(list) {
+  if (!list.length) return;
+  const live = list.filter(a => a.status === "in_progress" || a.status === "suspended").length;
+  const names = list.slice(0, 8).map(a => "• " + a.name).join("\n") + (list.length > 8 ? `\n… و${list.length - 8} آخرين` : "");
+  if (!confirm(`حذف ${list.length === 1 ? "الطالب" : list.length + " طالب"} نهائيًا مع درجاتهم وأدلتهم؟\n\n${names}${live ? `\n\n⚠️ منهم ${live} داخل الاختبار الآن — سيُطرد من الاختبار.` : ""}\n\nلا يمكن التراجع، ويمكن للطالب بعدها دخول الاختبار من جديد.`)) return;
+  const b = $("btnDelSel"); b.disabled = true;
+  try {
+    await deleteAttempts(list);
+    list.forEach(a => { rSel.delete(a.id); delete S.attempts[a.id]; delete S.evCache[a.id]; });
+    renderResults(); renderAll();
+    toast("ok", "✓ تم الحذف", list.length === 1 ? list[0].name : `${list.length} طالب`);
+  } catch (e) { permError(e); }
+  finally { b.disabled = false; }
+}
+window.__delStudent = id => { const a = S.attempts[id]; if (a) removeStudents([a]); };
+$("btnDelSel").onclick = () => removeStudents([...rSel].map(id => S.attempts[id]).filter(Boolean));
+
 function renderResults() {
   const R = currentRows();
   $("rCount").textContent = `${R.length} طالب`;
@@ -921,16 +952,17 @@ function renderResults() {
   $("btnEssays").classList.toggle("hidden", !pend); $("btnEssays").textContent = `✍️ تصحيح المقالي (${pend})`;
   $("rBody").innerHTML = R.length ? R.map((a, i) => {
     const sc = scoreOf(a), gr = sc ? gradeOf(sc.pct, passOf(a), sc.failed) : null;
-    return `<tr data-id="${esc(a.id)}">
-      <td style="color:var(--faint)">${i + 1}</td><td class="name">${esc(a.name)}${a.seat ? `<br><small style="color:var(--muted);font-weight:500">جلوس ${esc(a.seat)}</small>` : ""}</td><td>${esc(a.group)}</td><td>${esc(a.course)}</td>
+    return `<tr data-id="${esc(a.id)}" class="${rSel.has(a.id) ? "sel" : ""}">
+      <td class="sel-col"><input type="checkbox" class="rChk" data-id="${esc(a.id)}" ${rSel.has(a.id) ? "checked" : ""} aria-label="تحديد"></td><td style="color:var(--faint)">${i + 1}</td><td class="name">${esc(a.name)}${a.seat ? `<br><small style="color:var(--muted);font-weight:500">جلوس ${esc(a.seat)}</small>` : ""}</td><td>${esc(a.group)}</td><td>${esc(a.course)}</td>
       <td>${sc ? `<span class="score">${sc.s} <small>/ ${sc.t}</small></span>${sc.pending ? `<br><small style="color:var(--info)">✍️ ${sc.pending} للتصحيح</small>` : ""}` : "—"}</td>
       <td>${sc ? `<div style="display:flex;align-items:center;gap:.5rem"><div class="bar" style="flex:1"><i style="width:${sc.pct}%;background:${pctColor(sc.pct)}"></i></div><small style="font-weight:700">${sc.pct}%</small></div>` : "—"}</td>
       <td>${gr ? `<b style="color:${gr.color};font-size:.85rem">${gr.label}</b>` : "—"}</td>
       <td>${statusBadge(a)}</td><td>${warnBadge(a.violationCount)}</td>
       <td>${a.location ? `<a href="${mapLink(a)}" target="_blank" rel="noopener" title="${esc(a.location.address || "")}">📍</a>` : `<small style="color:var(--danger)">—</small>`}</td>
       <td><small>${fmtDateTime(a.submittedAtMs)}</small></td>
-      <td><button class="btn ghost sm" data-act="detail" data-arg="${esc(a.id)}">ورقة الإجابة</button></td></tr>`;
-  }).join("") : `<tr><td colspan="12"><div class="empty"><div class="e-ic">📋</div>لا توجد نتائج مطابقة</div></td></tr>`;
+      <td><div class="row-acts"><button class="btn ghost sm" data-act="detail" data-arg="${esc(a.id)}">ورقة الإجابة</button><button class="btn ghost sm btn-del" data-act="delStudent" data-arg="${esc(a.id)}" title="حذف الطالب ونتيجته">🗑</button></div></td></tr>`;
+  }).join("") : `<tr><td colspan="13"><div class="empty"><div class="e-ic">📋</div>لا توجد نتائج مطابقة</div></td></tr>`;
+  updateSelUI(R);
 }
 $("btnExport").onclick = () => {
   const R = currentRows();

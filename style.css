@@ -1031,3 +1031,9 @@ body.app .pl-body{max-height:calc(100dvh - 400px);min-height:140px}
 body.app .pl-body{max-height:calc(100dvh - 330px)}
 .pl-row .field>span{margin-bottom:.25rem}
 @media (max-width:600px){body.app .pl-body{max-height:calc(100dvh - 380px)}#plBack{width:100%}}
+
+/* ===== تحديد وحذف الطلاب من النتائج ===== */
+.sel-col{width:34px;text-align:center}
+.sel-col input{width:17px;height:17px;accent-color:var(--danger);cursor:pointer}
+#rBody tr.sel td{background:#fff1f2}
+.row-acts{display:flex;gap:.35rem;align-items:center;justify-content:flex-end;flex-wrap:nowrap}
