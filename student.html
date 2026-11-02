@@ -1,15 +1,16 @@
 <!doctype html>
-<html lang="ar" dir="rtl">
+<html lang="ar" dir="rtl" translate="no">
 <head>
 <meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://www.gstatic.com https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://www.google.com https://www.recaptcha.net 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob: https:; media-src 'self' blob: mediastream:; connect-src 'self' https://*.googleapis.com https://*.firebaseio.com wss://*.firebaseio.com https://*.firebaseapp.com https://nominatim.openstreetmap.org https://script.google.com https://script.googleusercontent.com https://cdn.jsdelivr.net https://storage.googleapis.com https://www.google.com https://www.gstatic.com; frame-src https://*.firebaseapp.com https://www.google.com https://www.recaptcha.net; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'">
+<meta name="google" content="notranslate">
 <meta name="referrer" content="strict-origin-when-cross-origin">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>الاختبارات الإلكترونية</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@600;700;800&family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="style.css?v=20261102e">
 </head>
 <body class="no-select app">
 
@@ -75,6 +76,20 @@
   </section>
 
   <!-- التحقق والتعليمات -->
+  <section class="screen card hidden" id="scrPledge">
+    <div class="pl-head"><span class="pl-ic">📜</span><div><h2>ميثاق الاختبار</h2><small id="plSub">اقرأ البنود كلها بعناية — لازم توصل لآخرها عشان تقدر توقّع</small></div></div>
+    <div class="pl-body" id="plBody" tabindex="0"></div>
+    <div class="pl-sign">
+      <label class="agree pl-agree"><input type="checkbox" id="plAgree" disabled> <span>قرأت ميثاق الاختبار وفهمته، وأوافق على كل بنوده، وأقر بأن أي مخالفة له تُعد محاولة غش يُحرَّر بها <b>محضر غش</b> وأنا مُقِر بها.</span></label>
+      <div class="pl-row">
+        <label class="field"><span>✍️ اكتب اسمك بالكامل كتوقيع</span><input class="input" id="plName" autocomplete="off" disabled placeholder="نفس الاسم المسجل"></label>
+        <button class="btn gold lg" id="plOk" disabled>أوافق وأوقّع ←</button>
+        <button class="btn ghost" id="plBack" type="button">رجوع</button>
+      </div>
+      <div class="err hidden" id="plErr"></div>
+    </div>
+  </section>
+
   <section class="screen card hidden" id="scrRules">
     <h2 id="rTitle">—</h2>
     <div class="meta-chips" id="rChips"></div>
@@ -86,10 +101,11 @@
           <div class="cam-txt"><b>📷 المراقبة بالكاميرا</b><small id="camText">تُلتقط صور لك أثناء الاختبار وعند أي مخالفة. اجلس في مكان مضاء ووجهك داخل الإطار.</small>
             <button class="btn ghost sm hidden" id="btnCamRetry">إعادة تشغيل الكاميرا</button></div>
         </div>
+        <div class="cam-help hidden" id="camHelp"></div>
       </div>
       <div class="rg-col">
         <div class="rules" id="rulesList"></div>
-        <label class="agree"><input type="checkbox" id="agree"> <span>قرأت التعليمات وأتعهد بأداء الاختبار بنفسي دون أي مساعدة.</span></label>
+        <label class="agree"><input type="checkbox" id="agree" disabled> <span>✍️ وقّعت على ميثاق الاختبار وأتعهد بالالتزام بكل بنوده.</span></label>
         <div class="err hidden" id="startErr"></div>
         <div class="rg-btns">
           <button class="btn gold lg" id="btnStart" disabled>ابدأ الاختبار الآن</button>
@@ -143,6 +159,7 @@
     <h2 id="doneTitle">تم تسليم الاختبار بنجاح</h2>
     <p id="doneMsg"></p>
     <span class="save-state" id="saveState">جارٍ حفظ إجاباتك…</span>
+    <a class="btn gold lg hidden" id="sebQuit" href="#">🔓 إنهاء وفتح الجهاز</a>
   </section>
 
   <section class="screen card final fail hidden" id="scrFail">
@@ -150,6 +167,19 @@
     <h2>لقد رسبت في الاختبار</h2>
     <p id="failMsg">تم غلق الاختبار نهائيًا بسبب تكرار محاولات الغش.</p>
     <div class="final-warn">تم تسجيل جميع المخالفات بالأدلة المصوّرة وإبلاغ المشرف.</div>
+  </section>
+
+  <section class="screen card final hidden" id="scrSEB">
+    <div class="big-ic">🔒</div>
+    <h2>الاختبار ده لازم يتفتح في «المتصفح الآمن»</h2>
+    <p>جهازك (<b id="sebDev">—</b>) بيدعم <b>Safe Exam Browser</b>. البرنامج بيقفل الجهاز على الاختبار ومش هتقدر تخرج منه غير لما تسلّم.</p>
+    <ol class="seb-steps">
+      <li><b>نزّل البرنامج مرة واحدة (مجاني):</b> <a id="sebGet" href="https://safeexambrowser.org/download_en.html" target="_blank" rel="noopener">تحميل Safe Exam Browser</a></li>
+      <li><b>اضغط الزر ده</b> — هيفتح البرنامج على صفحة الاختبار تلقائيًا (لو ظهرت رسالة «فتح التطبيق؟» اختار «فتح»).</li>
+      <li>جوه البرنامج اختار المقرر وادخل بياناتك من جديد.</li>
+    </ol>
+    <a class="btn primary lg" id="sebOpen" href="#">🔒 افتح الاختبار في المتصفح الآمن</a>
+    <button class="btn ghost sm" id="sebBack" type="button">رجوع</button>
   </section>
 
   <section class="screen card final bad hidden" id="scrBlocked">
@@ -197,10 +227,20 @@
 <div class="selfcam hidden" id="selfcam"><video id="camLive" autoplay playsinline muted></video><span><i></i> REC</span><b class="face-state" id="faceState"></b></div>
 
 <!-- الإنذار الأحمر -->
+<div class="overlay red hidden" id="camBlock" role="alertdialog" aria-live="assertive">
+  <div class="alarm">
+    <div class="siren">📷</div>
+    <h2>الاختبار متوقف</h2>
+    <p style="font-size:1.05rem;font-weight:700">لازم الكاميرا والميكروفون يكونوا شغالين عشان تكمل</p>
+    <div class="why" id="cbWhy">—</div>
+    <p>تم تسجيل المخالفة وإبلاغ المشرف. <b>الوقت مستمر</b> — شغّل الكاميرا من إعدادات الجهاز ثم اضغط الزر.</p>
+    <button class="btn lg" id="cbRetry">🔄 تشغيل الكاميرا والمتابعة</button>
+  </div>
+</div>
 <div class="overlay red hidden" id="warnOverlay">
   <div class="alarm">
     <div class="siren">🚨</div>
-    <h2>إنذار أول!</h2>
+    <h2 id="warnTitle">إنذار أول!</h2>
     <p style="font-size:1.1rem;font-weight:700">تم رصد محاولة غش</p>
     <div class="why" id="warnWhy">—</div>
     <p>تم تسجيل المخالفة وتصويرها وإرسال تنبيه فوري للمشرف.<br><b id="warnNext">إذا تكررت سيتم إغلاق الاختبار ومسح جميع إجاباتك.</b></p>
@@ -232,6 +272,6 @@
 <div class="s-toast hidden" id="sToast"></div>
 <div class="time-alert hidden" id="timeAlert" role="alert" aria-live="assertive"><span class="ta-ic">⏰</span><div class="ta-txt"><b id="taTitle"></b><small id="taSub"></small></div><button type="button" class="ta-x" id="taClose" aria-label="إغلاق">✕</button></div>
 
-<script type="module" src="student.js"></script>
+<script type="module" src="student.js?v=20261102e"></script>
 </body>
 </html>

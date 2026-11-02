@@ -8,7 +8,8 @@ import { isConfigured, esc, fmtDateTime, fmtTime, mmss, LETTERS, frameGuard, ini
 import { parseWordText, parseRows, wordHtmlToText, TYPE_LABEL, LEVEL_LABEL, splitAccepted, normAr } from "./parser.js";
 import { questionsOf, answerText, correctText, isAnswered } from "./scoring.js";
 import { gradeOf, isExpired, isFinished, computeReport } from "./analytics.js";
-import { printGradeSheet } from "./print.js";
+import { printGradeSheet, printCheatReport } from "./print.js";
+import { deviceText } from "./device.js";
 import { $, S, hooks, scoreOf, passOf, nflags, pctColor, mapLink, byName, statusBadge, warnBadge, toast, loadEvidence, shotsHtml, timelineHtml, resultRow, RES_W, sheet, safeName } from "./admin-shared.js";
 import { initReports, renderReports } from "./reports.js";
 import { mountGuide } from "./guide.js";
@@ -392,6 +393,8 @@ window.__detail = async id => {
         <dt>الحالة</dt><dd>${statusBadge(a)} ${num(a.restarts) ? `<span class="badge b-w1">أُعيد ${num(a.restarts)}×</span>` : ""}</dd>
         <dt>الدرجة</dt><dd>${sc ? `<span class="score">${sc.s} <small>/ ${sc.t}</small></span> (${sc.pct}%) — <b style="color:${gr.color}">${gr.label}</b>${sc.pending ? ` <span class="badge b-run">${sc.pending} مقالي ينتظر التصحيح</span>` : ""}` : "—"}</dd>
         <dt>البدء / التسليم</dt><dd>${fmtDateTime(a.startedAtMs)} ← ${fmtDateTime(a.submittedAtMs)}${a.extraMin ? ` • وقت إضافي ${num(a.extraMin)} د` : ""}</dd>
+        <dt>ميثاق الاختبار</dt><dd>${a.pledge ? `<b style="color:var(--ok)">✍️ وقّع بالموافقة</b> باسم «${esc(a.pledge.name)}» — ${fmtDateTime(a.pledge.at)}` : `<span style="color:var(--muted)">لا يوجد توقيع مسجل</span>`}</dd>
+        <dt>الجهاز</dt><dd>${a.device ? `${esc(deviceText(a.device))}<br><small style="color:var(--muted)">الشاشة ${esc(a.device.screen || "")}${a.camera ? " • 📷 كاميرا" : ""}${a.mic ? " • 🎙️ ميكروفون" : ""}</small>` : "—"}</dd>
         <dt>الموقع</dt><dd>${a.geoLock ? `<b style="color:var(--ok)">📍 داخل الكلية</b>${a.geoDist != null ? ` (يبعد ${num(a.geoDist)} م عن المركز)` : ""}<br>` : ""}${a.location ? `<a href="${mapLink(a)}" target="_blank" rel="noopener">📍 فتح على الخريطة</a><br><small style="color:var(--muted)">${esc(a.location.address || `${a.location.lat}, ${a.location.lng}`)} (±${num(a.location.accuracy)}م)</small>` : `<span style="color:var(--danger)">${esc(a.locationError || "غير متاح")}</span>`}</dd>
         <dt>الجهاز</dt><dd><small style="color:var(--muted);word-break:break-all">${a.touch ? "📱 جهاز لمس" : "💻 كمبيوتر"} • شاشة ${esc(a.screen || "")}${a.faceAI ? " • 🤖 كشف الوجه" : ""}<br>${esc(a.userAgent || "")}</small></dd>
       </dl>
@@ -404,6 +407,7 @@ window.__detail = async id => {
       <h4 style="margin:1.2rem 0 .6rem;color:var(--ink)">🕒 السجل الزمني (${num(a.violationCount)} محاولة غش • ${nflags(a)} ثانوية)</h4>
       ${timelineHtml(a)}
       <div style="display:flex;gap:.6rem;margin-top:1.5rem;flex-wrap:wrap;border-top:1px solid var(--line);padding-top:1.2rem">
+        <button class="btn gold sm" id="mCheat">🧾 طباعة محضر الغش</button>
         <button class="btn danger sm" id="mReset">↺ السماح له بإعادة الاختبار من الصفر</button>
         ${a.status !== "locked" ? `<button class="btn ghost sm" style="color:var(--danger)" data-act="failNow" data-arg="${esc(a.id)}">⛔ اعتباره راسبًا (غش)</button>` : ""}
       </div>
@@ -414,6 +418,10 @@ window.__detail = async id => {
   $("mReset").onclick = async () => {
     if (!confirm(`حذف محاولة «${a.name}» وأدلتها والسماح له بالدخول من جديد؟`)) return;
     try { await deleteAttempts([a]); closeModal(); toast("ok", "✓ تم", `يمكن الآن لـ ${a.name} دخول الاختبار من جديد.`); } catch (e) { permError(e); }
+  };
+  $("mCheat").onclick = async () => {
+    const list = await loadEvidence(id);
+    printCheatReport({ exam: S.exams[a.examId] || { course: a.course, title: a.examTitle }, a, evidence: list, owner: S.me.name });
   };
   const ev = await loadEvidence(id);
   if ($("mShots")) $("mShots").innerHTML = shotsHtml(ev);
@@ -524,7 +532,7 @@ $("btnPublish").onclick = async () => {
     const batch = writeBatch(db);
     batch.set(ref, {
       course, title, duration, passMark, openAt, closeAt, drawCount: drawCount >= questions.length ? 0 : drawCount,
-      negative: +$("nNeg").value, perQSec: Math.max(0, parseInt($("nPerQ").value, 10) || 0), noBack: $("nNoBack").value === "1",
+      negative: +$("nNeg").value, perQSec: 0, noBack: false, mic: $("nCam").value === "1" && $("nMic").value === "1", seb: $("nSeb").value === "1",
       shuffle: $("nShuffle").value === "1", shuffleOptions: $("nShuffleOpt").value === "1",
       camera: $("nCam").value === "1", faceAI: $("nCam").value === "1" && $("nFace").value === "1", active: true,
       geoLock: $("nGeo").value === "1", geo: { ...SETTINGS.geoFence, radius: Math.max(50, parseInt($("nRadius").value, 10) || SETTINGS.geoFence.radius) },
@@ -558,12 +566,14 @@ function renderExams() {
     const n = e.drawCount ? `${e.drawCount} من ${e.qCount}` : e.qCount || e.questions.length;
     return `<div class="ecard ${e.active ? "on" : ""}">
       <div class="course">${esc(e.course)}${S.me.isSuper && e.ownerName ? ` <small style="color:var(--muted);font-weight:600">• ${esc(e.ownerName)}</small>` : ""}</div><h4>${esc(e.title)}</h4>
-      <div class="row"><span class="chip blue">📝 ${n} سؤال</span><span class="chip blue">⏱️ ${e.duration} د</span><span class="chip blue">✔ ${e.passMark || 50}%</span>${e.camera ? `<span class="chip">📷${e.faceAI ? " 🤖" : ""}</span>` : ""}${e.geoLock ? `<span class="chip">📍 داخل الكلية</span>` : ""}${e.rosterId ? `<span class="chip">👥 ${esc(S.rosters[e.rosterId]?.name || "كشف")}</span>` : ""}${e.negative ? `<span class="chip">➖ سالب</span>` : ""}${e.noBack || e.perQSec ? `<span class="chip">🔒 بلا رجوع</span>` : ""}</div>
+      <div class="row"><span class="chip blue">📝 ${n} سؤال</span><span class="chip blue">⏱️ ${e.duration} د</span><span class="chip blue">✔ ${e.passMark || 50}%</span>${e.camera ? `<span class="chip">📷${e.faceAI ? " 🤖" : ""}</span>` : ""}${e.geoLock ? `<span class="chip">📍 داخل الكلية</span>` : ""}${e.rosterId ? `<span class="chip">👥 ${esc(S.rosters[e.rosterId]?.name || "كشف")}</span>` : ""}${e.negative ? `<span class="chip">➖ سالب</span>` : ""}${e.camera && e.mic !== false ? `<span class="chip">🎙️ رصد الكلام</span>` : ""}${e.seb ? `<span class="chip">🔒 متصفح آمن</span>` : ""}</div>
       <div class="row"><span class="badge ${e.active ? "b-ok" : "b-w0"}">${!e.active ? "○ مغلق" : e.groupGate ? `● مفتوح لـ ${(e.openGroups || []).length ? "م " + sortGroups(e.openGroups).join("، ") : "لا مجموعة"}` : "● مفتوح للطلاب"}</span>${windowText(e)}<span class="badge b-w0">👥 ${A.length}</span>${A.some(a => a.violationCount) ? `<span class="badge b-w2">⚠️ ${A.filter(a => a.violationCount).length}</span>` : ""}</div>
       <div class="acts">
         <button class="btn ${e.active ? "ghost" : "ok"} sm" data-act="toggle" data-arg="${esc(e.id)}">${e.active ? "⏸ إغلاق" : "▶ فتح"}</button>
         <button class="btn ${e.groupGate ? "gold" : "ghost"} sm" data-act="groups" data-arg="${esc(e.id)}">👥 المجموعات</button>
         <button class="btn primary sm" data-act="qr" data-arg="${esc(e.id)}">🔗 الرابط و QR</button>
+        <button class="btn ghost sm" data-act="edit" data-arg="${esc(e.id)}" title="تعديل الإعدادات ونسبة النجاح">⚙️ تعديل</button>
+        <button class="btn ghost sm btn-del" data-act="del" data-arg="${esc(e.id)}" title="حذف الاختبار نهائيًا">🗑 حذف</button>
         <div class="dropdown"><button class="btn ghost sm" data-act="dd" data-this="1">⋯ المزيد</button><div class="dd-menu">
           <button data-act="openKey" data-arg="${esc(e.id)}">🔑 مفتاح الإجابة / إلغاء سؤال</button>
           <button data-act="edit" data-arg="${esc(e.id)}">⚙️ تعديل الإعدادات</button>
@@ -575,15 +585,25 @@ function renderExams() {
   }).join("") : `<div class="panel" style="grid-column:1/-1"><div class="empty"><div class="e-ic">📭</div>لم تنشر أي اختبار بعد — ارفع ملف الأسئلة بالأعلى</div></div>`;
 }
 window.__dd = btn => {
-  const d = btn.parentElement; const open = !d.classList.contains("open");
-  document.querySelectorAll(".dropdown.open").forEach(x => x.classList.remove("open", "up"));
-  d.classList.toggle("open", open);
-  if (open) { // افتح القائمة لأعلى لو مفيش مساحة تحت
-    const m = d.querySelector(".dd-menu"), r = m.getBoundingClientRect();
-    if (r.bottom > innerHeight - 8 && d.getBoundingClientRect().top > r.height + 16) d.classList.add("up");
-  }
+  const d = btn.parentElement, m = d.querySelector(".dd-menu"), open = !d.classList.contains("open");
+  closeDropdowns();
+  if (!open) return;
+  d.classList.add("open");
+  // القائمة تُعرض «طافية» فوق الصفحة كلها فلا تقصّها أي بطاقة أو حاوية
+  const r = btn.getBoundingClientRect();
+  m.style.position = "fixed"; m.style.visibility = "hidden"; m.style.display = "block";
+  const mw = m.offsetWidth, mh = m.offsetHeight;
+  let left = Math.min(Math.max(8, r.left), innerWidth - mw - 8);
+  let top = r.bottom + 6;
+  if (top + mh > innerHeight - 8) top = Math.max(8, r.top - mh - 6);
+  Object.assign(m.style, { left: left + "px", top: top + "px", right: "auto", bottom: "auto", visibility: "", display: "" });
 };
-document.addEventListener("click", e => { if (!e.target.closest(".dropdown")) document.querySelectorAll(".dropdown.open").forEach(x => x.classList.remove("open")); });
+function closeDropdowns() {
+  document.querySelectorAll(".dropdown.open").forEach(x => { x.classList.remove("open", "up"); const m = x.querySelector(".dd-menu"); if (m) m.removeAttribute("style"); });
+}
+window.addEventListener("scroll", e => { if (!(e.target instanceof Element && e.target.closest(".dd-menu"))) closeDropdowns(); }, true);
+window.addEventListener("resize", closeDropdowns);
+document.addEventListener("click", e => { if (!e.target.closest(".dropdown")) closeDropdowns(); else if (e.target.closest(".dd-menu button")) setTimeout(closeDropdowns, 0); });
 // ===================== فتح وغلق الاختبار لكل مجموعة على حدة (بدون مواعيد)
 const sortGroups = g => [...new Set((g || []).map(String))].sort((a, b) => (parseFloat(a) || 0) - (parseFloat(b) || 0) || a.localeCompare(b, "ar"));
 let groupsModalId = null;
@@ -681,12 +701,12 @@ window.__edit = id => {
       <label class="field"><span>يُفتح من</span><input class="input" id="eOpen" type="datetime-local" value="${toLocalInput(e.openAt)}"></label>
       <label class="field"><span>يُغلق في</span><input class="input" id="eClose" type="datetime-local" value="${toLocalInput(e.closeAt)}"></label>
       <label class="field"><span>عدد الأسئلة لكل طالب (0 = الكل)</span><input class="input" id="eDraw" type="number" value="${e.drawCount || 0}"></label>
-      <label class="field"><span>وقت لكل سؤال (ثانية)</span><input class="input" id="ePerQ" type="number" value="${e.perQSec || 0}"></label>
       <label class="field"><span>الدرجة السالبة</span><select class="input" id="eNeg">${[["0", "لا توجد"], ["0.25", "ربع"], ["0.3333", "ثلث"], ["0.5", "نصف"]].map(([v, t]) => `<option value="${v}" ${Math.abs((e.negative || 0) - v) < 0.001 ? "selected" : ""}>${t}</option>`).join("")}</select></label>
-      <label class="field"><span>التنقل</span><select class="input" id="eNoBack">${sel(e.noBack, "ممنوع الرجوع", "حر")}</select></label>
       <label class="field"><span>ترتيب الأسئلة</span><select class="input" id="eSh">${sel(e.shuffle, "عشوائي", "ثابت")}</select></label>
       <label class="field"><span>ترتيب الاختيارات</span><select class="input" id="eShO">${sel(e.shuffleOptions, "عشوائي", "ثابت")}</select></label>
       <label class="field"><span>الكاميرا</span><select class="input" id="eCam">${sel(e.camera, "مفعّلة", "بدون")}</select></label>
+      <label class="field"><span>🎙️ رصد الكلام</span><select class="input" id="eMic">${sel(e.camera && e.mic !== false, "مفعّل", "غير مفعّل")}</select></label>
+      <label class="field"><span>🔒 المتصفح الآمن SEB</span><select class="input" id="eSeb">${sel(e.seb, "إلزامي على الأجهزة المدعومة", "غير مطلوب")}</select></label>
       <label class="field"><span>كشف الوجه</span><select class="input" id="eFace">${sel(e.faceAI, "مفعّل", "غير مفعّل")}</select></label>
       <label class="field"><span>📍 مكان أداء الاختبار</span><select class="input" id="eGeo">${sel(e.geoLock, "داخل الكلية فقط", "من أي مكان")}</select></label>
       <label class="field"><span>نطاق السماح (متر)</span><input class="input" id="eRadius" type="number" min="50" max="5000" value="${num((e.geo || SETTINGS.geoFence).radius, 300)}"></label>
@@ -711,8 +731,8 @@ window.__edit = id => {
         course: $("eCourse").value.trim() || e.course, title: $("eTitle").value.trim() || e.title,
         duration: parseInt($("eDur").value, 10) || e.duration, passMark: parseInt($("ePass").value, 10) || 50,
         openAt: fromLocalInput($("eOpen").value), closeAt: fromLocalInput($("eClose").value),
-        drawCount: Math.max(0, parseInt($("eDraw").value, 10) || 0), perQSec: Math.max(0, parseInt($("ePerQ").value, 10) || 0), negative: +$("eNeg").value,
-        noBack: $("eNoBack").value === "1", shuffle: $("eSh").value === "1", shuffleOptions: $("eShO").value === "1",
+        drawCount: Math.max(0, parseInt($("eDraw").value, 10) || 0), perQSec: 0, negative: +$("eNeg").value,
+        noBack: false, mic: $("eCam").value === "1" && $("eMic").value === "1", seb: $("eSeb").value === "1", shuffle: $("eSh").value === "1", shuffleOptions: $("eShO").value === "1",
         camera: $("eCam").value === "1", faceAI: $("eCam").value === "1" && $("eFace").value === "1", rosterId: $("eRoster").value || "", active: $("eAct").value === "1",
         geoLock: $("eGeo").value === "1",
         geo: { ...SETTINGS.geoFence, ...(e.geo || {}), radius: Math.max(50, parseInt($("eRadius").value, 10) || 300), lat: Number($("eLat").value) || SETTINGS.geoFence.lat, lng: Number($("eLng").value) || SETTINGS.geoFence.lng }

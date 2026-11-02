@@ -990,3 +990,44 @@ input,select,textarea{font-size:16px}
 .ecard:has(.dropdown.open){z-index:30}
 .dropdown.up .dd-menu{top:auto;bottom:calc(100% + 6px)}
 .dd-menu{max-height:70vh;overflow:auto}
+.dropdown.open .dd-menu{z-index:1000}
+.btn-del{color:var(--danger)!important;border-color:#fecdd3!important}.btn-del:hover{background:#fff1f2!important}
+.ecard .acts{flex-wrap:wrap}
+
+/* ===== مساعدة تشغيل الكاميرا والميكروفون ===== */
+.cam-help{margin-top:.6rem;padding:.7rem .85rem;border-radius:12px;background:#fff7ed;border:1px solid #fed7aa;color:#7c2d12;font-size:.82rem;line-height:1.6}
+.cam-help b{display:block;margin-bottom:.25rem;color:#9a3412}
+.cam-help ol{margin:0;padding-inline-start:1.2rem}
+.cam-help small{display:block;margin-top:.3rem;color:#9a3412;font-weight:700}
+#camBlock{z-index:140}
+
+/* إخفاء الأسئلة عند فقدان التركيز */
+body.unfocused #scrExam .qcard,body.unfocused #scrExam .qnav-card{filter:blur(14px);transition:filter .1s}
+
+/* ===== ميثاق الاختبار ===== */
+#scrPledge{display:flex;flex-direction:column;gap:.7rem;max-width:860px}
+#scrPledge.hidden{display:none}
+.pl-head{display:flex;align-items:center;gap:.8rem}
+.pl-ic{width:48px;height:48px;border-radius:14px;display:grid;place-items:center;font-size:1.6rem;background:linear-gradient(135deg,#fde68a,#f59e0b);flex:none}
+.pl-head h2{margin:0;font-family:var(--display);color:var(--ink)}
+.pl-head small{color:var(--muted);font-weight:600}
+.pl-body{flex:1;min-height:160px;max-height:min(52vh,460px);overflow:auto;border:1.5px solid var(--line);border-radius:16px;padding:1rem 1.1rem;background:#fffdf7;line-height:1.85;scroll-behavior:smooth}
+body.app .pl-body{max-height:calc(100dvh - 400px);min-height:140px}
+.pl-intro{margin:0 0 .6rem;color:var(--ink)}
+.pl-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:.55rem;counter-reset:pl}
+.pl-list li{display:flex;gap:.7rem;align-items:flex-start;padding:.55rem .7rem;border-radius:12px;background:#fff;border:1px solid #f1e7c8}
+.pl-list li .pl-n{font-size:1.25rem;line-height:1.4;flex:none}
+.pl-list li b{color:var(--ink);font-family:var(--display);display:block}
+.pl-list li p{margin:.1rem 0 0;color:#374151;font-size:.92rem}
+.pl-end{text-align:center;color:var(--muted);font-weight:700;margin:.8rem 0 0}
+.pl-sign{display:flex;flex-direction:column;gap:.55rem}
+.pl-agree{background:#fff7ed;border:1.5px solid #fed7aa;border-radius:12px;padding:.6rem .8rem}
+.pl-agree input:disabled+span{opacity:.55}
+.pl-row{display:flex;gap:.7rem;align-items:flex-end;flex-wrap:wrap}
+.pl-row .field{flex:1;min-width:220px;margin:0}
+.pl-row .btn{flex:none}
+#plBack{align-self:flex-start}
+@media (max-width:600px){.pl-body{padding:.7rem .75rem}.pl-list li p{font-size:.86rem}.pl-row .btn{width:100%}}
+body.app .pl-body{max-height:calc(100dvh - 330px)}
+.pl-row .field>span{margin-bottom:.25rem}
+@media (max-width:600px){body.app .pl-body{max-height:calc(100dvh - 380px)}#plBack{width:100%}}

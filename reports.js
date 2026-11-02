@@ -8,6 +8,7 @@ import { effectLabel } from "./stats.js";
 import { TYPE_LABEL } from "./parser.js";
 import { questionsOf } from "./scoring.js";
 import { printGradeSheet, printCertificates } from "./print.js";
+import { deviceText, osLabel, typeLabel } from "./device.js";
 import { $, S, hooks, scoreOf, statusBadge, warnBadge, nflags, mapLink, byName, pctColor, timelineHtml, shotsHtml, loadEvidence, resultRow, RES_W, sheet, toast, safeName } from "./admin-shared.js";
 
 let repTab = "overview", charts = [], pp = { pre: "", post: "", exp: null };
@@ -183,6 +184,7 @@ function secCheat(R) {
       <div class="kpi"><div class="v">${R.similar.length}</div><div class="l">حالة تشابه مريب في الإجابات</div></div>
       <div class="kpi"><div class="v">${R.fast.length}</div><div class="l">تسليم سريع بشكل غير طبيعي</div></div>
     </div>
+    ${devicesPanel(R.all)}
     ${R.similar.length ? `<div class="panel"><div class="panel-h"><h3>🔗 تشابه مريب في الإجابات (احتمال نقل)</h3></div>
       ${R.similar.slice(0, 30).map(s => `<div class="susp"><div class="si">🔗</div><div><b>${esc(s.x.a.name)} (م${esc(s.x.a.group)})</b> و <b>${esc(s.y.a.name)} (م${esc(s.y.a.group)})</b><br><small style="color:var(--muted)">نفس الإجابة في ${s.sim}% من الأسئلة، منها <b style="color:var(--danger)">${s.sameWrong} إجابات خاطئة متطابقة</b> — بدء الاختبار: ${fmtTime(s.x.a.startedAtMs)} و ${fmtTime(s.y.a.startedAtMs)}</small></div></div>`).join("")}</div>` : ""}
     ${R.fast.length ? `<div class="panel"><div class="panel-h"><h3>⚡ تسليم سريع بدرجة مرتفعة</h3></div>
@@ -328,4 +330,22 @@ async function exportExcel() {
     o.Total = r.s; o.Percent = r.pct; return o;
   }), [6, 10, 28, 8, 8]), "SPSS");
   XLSX.writeFile(wb, `تقرير-شامل-${safeName(R.exam.course + "-" + R.exam.title)}-${new Date().toISOString().slice(0, 10)}.xlsx`);
+}
+
+// ---- أجهزة الطلاب: نوع الجهاز والنظام والمتصفح + من دخل من المتصفح الآمن
+function devicesPanel(all) {
+  const A = all.filter(a => a.device);
+  if (!A.length) return "";
+  const count = f => { const m = {}; A.forEach(a => { const k = f(a); m[k] = (m[k] || 0) + 1; }); return Object.entries(m).sort((x, y) => y[1] - x[1]); };
+  const chips = L => L.map(([k, n]) => `<span class="chip blue">${esc(k)}: <b>${n}</b></span>`).join(" ");
+  const seb = A.filter(a => a.seb).length;
+  return `<div class="panel"><div class="panel-h"><h3>📱 أجهزة الطلاب (${A.length})</h3><small style="color:var(--muted)">${seb} طالب دخل من المتصفح الآمن SEB</small></div>
+    <div class="panel-b" style="display:flex;flex-direction:column;gap:.5rem">
+      <div><b>نوع الجهاز:</b> ${chips(count(a => typeLabel(a.device.type)))}</div>
+      <div><b>النظام:</b> ${chips(count(a => osLabel(a.device.os)))}</div>
+      <div><b>المتصفح:</b> ${chips(count(a => a.device.browser || "—"))}</div>
+    </div>
+    <div class="tbl-wrap"><table class="tbl"><thead><tr><th>الطالب</th><th>المجموعة</th><th>الجهاز</th><th>SEB</th><th>الغش</th></tr></thead><tbody>
+    ${[...A].sort(byName).map(a => `<tr><td>${esc(a.name)}</td><td>${esc(a.group)}</td><td>${esc(deviceText(a.device))}</td><td>${a.seb ? "✓" : "—"}</td><td>${a.violationCount || 0}</td></tr>`).join("")}
+    </tbody></table></div></div>`;
 }

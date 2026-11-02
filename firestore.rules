@@ -153,7 +153,10 @@ service cloud.firestore {
         allow create: if signedIn() && att().uid == request.auth.uid
                       && request.resource.data.img is string && request.resource.data.img.size() < 300000
                       && request.resource.data.img.matches('data:image/jpeg;base64,.*')
-                      && request.resource.data.kind in ['start', 'periodic', 'violation', 'end']
+                      && request.resource.data.kind in ['start', 'periodic', 'violation', 'end', 'talk', 'flag']
+                      && (!('audio' in request.resource.data) || (request.resource.data.audio is string
+                          && request.resource.data.audio.size() < 220000
+                          && request.resource.data.audio.matches('data:audio/[a-z0-9.+-]+;base64,.*')))
                       && request.resource.data.type is string && request.resource.data.type.size() < 300
                       && (att().status in ['in_progress', 'suspended']
                           || request.time < att().submittedAt + duration.value(2, 'm'));

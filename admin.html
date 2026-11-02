@@ -2,14 +2,14 @@
 <html lang="ar" dir="rtl">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://www.gstatic.com https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://www.google.com https://www.recaptcha.net 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob: https:; media-src 'self' blob: mediastream:; connect-src 'self' https://*.googleapis.com https://*.firebaseio.com wss://*.firebaseio.com https://*.firebaseapp.com https://nominatim.openstreetmap.org https://script.google.com https://script.googleusercontent.com https://cdn.jsdelivr.net https://storage.googleapis.com https://www.google.com https://www.gstatic.com; frame-src https://*.firebaseapp.com https://www.google.com https://www.recaptcha.net; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://www.gstatic.com https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://www.google.com https://www.recaptcha.net 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob: https:; media-src 'self' data: blob: mediastream:; connect-src 'self' https://*.googleapis.com https://*.firebaseio.com wss://*.firebaseio.com https://*.firebaseapp.com https://nominatim.openstreetmap.org https://script.google.com https://script.googleusercontent.com https://cdn.jsdelivr.net https://storage.googleapis.com https://www.google.com https://www.gstatic.com; frame-src https://*.firebaseapp.com https://www.google.com https://www.recaptcha.net; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'">
 <meta name="referrer" content="strict-origin-when-cross-origin">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>لوحة المشرف — الاختبارات الإلكترونية</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@600;700;800&family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="style.css?v=20261102e">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.8.0/mammoth.browser.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
@@ -121,9 +121,9 @@
             <label class="field"><span>الدرجة السالبة للإجابة الخاطئة</span><select class="input" id="nNeg"><option value="0">لا توجد</option><option value="0.25">ربع درجة السؤال</option><option value="0.3333">ثلث درجة السؤال</option><option value="0.5">نصف درجة السؤال</option></select></label>
             <label class="field"><span>ترتيب الأسئلة</span><select class="input" id="nShuffle"><option value="1">عشوائي لكل طالب</option><option value="0">بنفس ترتيب الملف</option></select></label>
             <label class="field"><span>ترتيب الاختيارات</span><select class="input" id="nShuffleOpt"><option value="1">عشوائي لكل طالب</option><option value="0">بنفس ترتيب الملف</option></select></label>
-            <label class="field"><span>التنقل بين الأسئلة</span><select class="input" id="nNoBack"><option value="0">حر (يرجع ويعدّل)</option><option value="1">ممنوع الرجوع للسؤال السابق</option></select></label>
-            <label class="field"><span>وقت محدد لكل سؤال (ثانية)</span><input class="input" id="nPerQ" type="number" min="0" value="0" placeholder="0 = بدون"></label>
             <label class="field"><span>المراقبة بالكاميرا</span><select class="input" id="nCam"><option value="1">مفعّلة — تصوير الطالب كدليل</option><option value="0">بدون كاميرا</option></select></label>
+            <label class="field"><span>🎙️ رصد الكلام بالميكروفون</span><select class="input" id="nMic"><option value="1">مفعّل — كل 3 مرات كلام = محاولة غش</option><option value="0">غير مفعّل</option></select></label>
+            <label class="field"><span>🔒 المتصفح الآمن Safe Exam Browser</span><select class="input" id="nSeb"><option value="0" selected>غير مطلوب (الافتراضي)</option><option value="1">إلزامي على الأجهزة التي تدعمه (ويندوز/ماك/آيفون/آيباد) — يلزم تنزيل البرنامج مسبقًا</option></select></label>
             <label class="field"><span>كشف الوجه بالذكاء الاصطناعي</span><select class="input" id="nFace"><option value="1">مفعّل (غياب / أكثر من شخص / النظر بعيدًا)</option><option value="0">غير مفعّل</option></select></label>
             <label class="field"><span>📍 مكان أداء الاختبار</span><select class="input" id="nGeo"><option value="1">داخل الكلية فقط</option><option value="0">من أي مكان</option></select></label>
             <label class="field"><span>نطاق السماح حول الكلية (متر)</span><input class="input" id="nRadius" type="number" min="50" max="5000" value="300"></label>
@@ -275,6 +275,6 @@
 <div class="toasts" id="toasts"></div>
 <div class="overlay hidden" id="modal"><div class="modal-card" id="modalCard"></div></div>
 
-<script type="module" src="admin.js"></script>
+<script type="module" src="admin.js?v=20261102e"></script>
 </body>
 </html>

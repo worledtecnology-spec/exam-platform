@@ -1,7 +1,9 @@
 // =====================================================================
 //  الطباعة الرسمية: كشف الدرجات + شهادات التفوق
 // =====================================================================
-import { esc } from "./common.js";
+import { esc, fmtDateTime, fmtTime, safeImg } from "./common.js";
+import { pledgeClauses } from "./pledge.js";
+import { deviceText } from "./device.js";
 import { SETTINGS } from "./config.js";
 
 const FONT = `<link href="https://fonts.googleapis.com/css2?family=Amiri:wght@400;700&family=Cairo:wght@600;700;800&family=IBM+Plex+Sans+Arabic:wght@400;600;700&display=swap" rel="stylesheet">`;
@@ -116,4 +118,65 @@ export function printCertificates({ exam, rows }) {
       <div class="foot"><div>التاريخ: ${today()}</div><div>أستاذ المقرر</div><div>رئيس القسم</div></div>
     </div></div>`).join("");
   return openPrint(`شهادات التفوق — ${exam.title}`, css, body);
+}
+
+// ------------------------------------------------------------- محضر غش إلكتروني
+const LVL = { warn: "إنذار", restart: "غلق الاختبار ومسح الإجابات", fail: "غلق نهائي ورسوب" };
+export function printCheatReport({ exam, a, evidence = [], owner = "" }) {
+  const C = pledgeClauses(exam, SETTINGS.penalties);
+  const V = (a.violations || []).slice().sort((x, y) => x.at - y.at);
+  const F = (a.flags || []).slice().sort((x, y) => x.at - y.at);
+  const shots = evidence.filter(e => (e.kind === "violation" || e.kind === "talk" || e.kind === "flag") && safeImg(e.img)).slice(0, 24);
+  const no = `${(exam.id || "EX").slice(0, 6).toUpperCase()}-${String(a.id || "").slice(-6).toUpperCase()}`;
+  const status = a.status === "locked" ? "غلق نهائي — راسب بسبب الغش" : a.restarts ? `أُعيد الاختبار ${a.restarts} مرة بسبب مخالفات` : V.length ? "إنذار" : "لا توجد محاولات غش مسجلة";
+  const css = `@page{size:A4;margin:13mm 12mm}
+  .head{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;border-bottom:3px double #8b1d2c;padding-bottom:10px;margin-bottom:12px}
+  .head .r{font-weight:700;line-height:1.8;font-size:13px}.head .l{text-align:left;font-size:12px;line-height:1.9;color:#333}
+  .seal{width:78px;height:78px;border-radius:50%;border:2px solid #8b1d2c;display:grid;place-items:center;font:800 11px "Cairo";color:#8b1d2c;text-align:center;line-height:1.3}
+  h1{font:800 22px "Cairo";text-align:center;color:#8b1d2c;margin:2px 0 10px}
+  h2{font:800 15px "Cairo";color:#1b2d5c;margin:14px 0 6px;border-right:4px solid #8b1d2c;padding-right:8px}
+  table{width:100%;border-collapse:collapse;font-size:12.5px}
+  th,td{border:1px solid #b8c0cf;padding:6px 7px;text-align:right;vertical-align:top}
+  th{background:#f1f3f8;color:#1b2d5c;width:22%}
+  .vt th{background:#8b1d2c;color:#fff;width:auto;text-align:center}.vt td{text-align:center}.vt td.t{text-align:right}
+  .pl{border:1px solid #e5d6a8;background:#fffdf5;border-radius:8px;padding:8px 12px;font-size:12px;line-height:1.8}
+  .pl ol{margin:4px 0 0;padding-right:18px}.pl li{margin-bottom:3px}
+  .ok{color:#0f7a4f;font-weight:700}.bad{color:#b4232c;font-weight:700}
+  .shots{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+  .shots figure{margin:0;border:1px solid #b8c0cf;border-radius:6px;overflow:hidden;page-break-inside:avoid}
+  .shots img{width:100%;display:block}.shots figcaption{font-size:9.5px;padding:3px 4px;background:#f6f7fb;line-height:1.4}
+  .sign{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;margin-top:30px;text-align:center;font-size:13px;font-weight:700;page-break-inside:avoid}
+  .sign div{border-top:1px dashed #69748f;padding-top:6px}
+  .note{font-size:11px;color:#555;margin-top:8px;line-height:1.7}`;
+  const body = `
+  <div class="head">
+    <div class="r">${esc(SETTINGS.platformName)}<br>${esc(SETTINGS.department || "")}</div>
+    <div class="seal">محضر<br>غش<br>إلكتروني</div>
+    <div class="l">رقم المحضر: <b>${esc(no)}</b><br>تاريخ التحرير: ${today()}</div>
+  </div>
+  <h1>محضر إثبات حالة غش في اختبار إلكتروني</h1>
+  <h2>أولًا: بيانات الاختبار والطالب</h2>
+  <table>
+    <tr><th>المقرر / الاختبار</th><td>${esc(exam.course || a.course)} — ${esc(exam.title || a.examTitle)}</td></tr>
+    <tr><th>اسم الطالب</th><td><b>${esc(a.name)}</b></td></tr>
+    <tr><th>المجموعة / رقم الجلوس</th><td>${esc(a.group)}${a.seat ? ` / ${esc(a.seat)}` : ""}</td></tr>
+    <tr><th>بدء الاختبار / التسليم</th><td>${fmtDateTime(a.startedAtMs)} ← ${a.submittedAtMs ? fmtDateTime(a.submittedAtMs) : "لم يسلّم"}</td></tr>
+    <tr><th>الجهاز المستخدم</th><td>${esc(a.device ? deviceText(a.device) : "—")}</td></tr>
+    <tr><th>الموقع</th><td>${a.location ? `${esc(a.location.address || "")} (${a.location.lat}, ${a.location.lng})${a.geoDist != null ? ` — يبعد ${a.geoDist} م عن مركز الكلية` : ""}` : esc(a.locationError || "غير متاح")}</td></tr>
+    <tr><th>الحالة النهائية</th><td class="${a.status === "locked" ? "bad" : ""}">${esc(status)}</td></tr>
+  </table>
+  <h2>ثانيًا: إقرار الطالب (ميثاق الاختبار)</h2>
+  <div class="pl">${a.pledge ? `<span class="ok">✍️ وقّع الطالب إلكترونيًا بالموافقة على ميثاق الاختبار</span> باسم «<b>${esc(a.pledge.name)}</b>» بتاريخ ${fmtDateTime(a.pledge.at)} (إصدار ${esc(a.pledge.v || "")})، وأقر بالبنود التالية:` : `<span class="bad">لا يوجد توقيع إلكتروني مسجل لهذه المحاولة.</span> بنود الميثاق المعمول به:`}
+    <ol>${C.map(c => `<li><b>${esc(c.t)}:</b> ${c.d}</li>`).join("")}</ol></div>
+  <h2>ثالثًا: المخالفات المرصودة (${V.length} محاولة غش)</h2>
+  ${V.length ? `<table class="vt"><thead><tr><th>م</th><th>التوقيت</th><th>نوع المخالفة</th><th>الإجراء المتخذ</th></tr></thead><tbody>
+    ${V.map((v, i) => `<tr><td>${i + 1}</td><td>${fmtTime(v.at)}</td><td class="t">${esc(v.type)}</td><td>${esc(LVL[v.level] || "")}</td></tr>`).join("")}</tbody></table>` : `<p class="ok">لم تُرصد محاولات غش.</p>`}
+  ${F.length ? `<h2>رابعًا: مخالفات ثانوية (${F.length})</h2><table class="vt"><thead><tr><th>م</th><th>التوقيت</th><th>الملاحظة</th></tr></thead><tbody>
+    ${F.slice(0, 60).map((f, i) => `<tr><td>${i + 1}</td><td>${fmtTime(f.at)}</td><td class="t">${esc(f.type)}</td></tr>`).join("")}</tbody></table>` : ""}
+  <h2>${F.length ? "خامسًا" : "رابعًا"}: الأدلة المصوّرة (${shots.length})</h2>
+  ${shots.length ? `<div class="shots">${shots.map(e => `<figure><img src="${esc(safeImg(e.img))}" alt=""><figcaption>${fmtTime(e.at)} — ${esc(e.type || "")}${e.audio ? " 🎙️ (يوجد تسجيل صوتي على المنصة)" : ""}</figcaption></figure>`).join("")}</div>` : `<p>لا توجد صور مسجلة.</p>`}
+  <p class="note">حُرِّر هذا المحضر آليًا من سجلات ${esc(SETTINGS.platformName)}، والتوقيتات مسجلة لحظة وقوع كل مخالفة. التسجيلات الصوتية وباقي الأدلة محفوظة على المنصة ويمكن الرجوع إليها.${owner ? ` أستاذ المقرر: ${esc(owner)}.` : ""}</p>
+  <div class="sign"><div>المراقب</div><div>أستاذ المقرر</div><div>رئيس الكنترول / وكيل الكلية</div></div>
+  <p dir="ltr" style="text-align:center;font-size:10px;color:#9aa3b8;margin-top:14px">© 2026 All Rights Reserved — Designed &amp; Developed by Dr. Alaa Dawood</p>`;
+  return openPrint(`محضر غش — ${a.name}`, css, body);
 }

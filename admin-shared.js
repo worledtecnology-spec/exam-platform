@@ -1,6 +1,7 @@
 // =====================================================================
 //  الحالة والأدوات المشتركة بين ملفات لوحة المشرف
 // =====================================================================
+import { deviceText } from "./device.js";
 import { collection, getDocs } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { esc, fmtDateTime, fmtTime, num, safeImg } from "./common.js";
 import { scoreAttempt } from "./scoring.js";
@@ -53,20 +54,21 @@ export async function loadEvidence(id) {
   } catch (e) { console.error(e); S.evCache[id] = []; }
   return S.evCache[id];
 }
-const KIND = { start: "بداية الاختبار", periodic: "صورة دورية", violation: "لحظة المخالفة", end: "نهاية الاختبار" };
+const KIND = { start: "بداية الاختبار", periodic: "صورة دورية", violation: "لحظة المخالفة", end: "نهاية الاختبار", talk: "رصد كلام (اسمع التسجيل)", flag: "مخالفة ثانوية" };
 export function shotsHtml(list) {
   if (!list.length) return `<p style="color:var(--faint);font-size:.88rem">لا توجد صور (الكاميرا غير مفعّلة لهذا الاختبار)</p>`;
   list = list.filter(e => safeImg(e.img));
+  const au = e => e.audio && /^data:audio\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=]+$/i.test(e.audio) ? e.audio : "";
   if (!list.length) return `<p style="color:var(--faint);font-size:.88rem">لا توجد صور صالحة</p>`;
-  return `<div class="shots">${list.map(e => `<div class="shot ${e.kind === "violation" ? "v" : ""} ${e.dark ? "dark" : ""}" data-act="zoom" data-this="1" data-cap="${esc((KIND[e.kind] || "") + (e.type && e.kind === "violation" ? " — " + e.type : "") + " • " + fmtTime(e.at))}">
-    <img src="${esc(safeImg(e.img))}" alt="" loading="lazy"><span>${e.kind === "violation" ? "🚨 " : ""}${esc(KIND[e.kind] || "")}<br>${fmtTime(e.at)}</span></div>`).join("")}</div>`;
+  return `<div class="shots">${list.map(e => `<div class="shot ${e.kind === "violation" || e.kind === "talk" ? "v" : ""} ${e.dark ? "dark" : ""}" data-act="zoom" data-this="1" data-cap="${esc((KIND[e.kind] || "") + (e.type && (e.kind === "violation" || e.kind === "talk" || e.kind === "flag") ? " — " + e.type : "") + " • " + fmtTime(e.at))}">
+    <img src="${esc(safeImg(e.img))}" alt="" loading="lazy"><span>${e.kind === "violation" ? "🚨 " : e.kind === "talk" ? "🎙️ " : ""}${esc(KIND[e.kind] || "")}<br>${fmtTime(e.at)}</span>${au(e) ? `<audio controls preload="none" src="${esc(au(e))}" data-act="noop"></audio>` : ""}</div>`).join("")}</div>`;
 }
 window.__zoom = el => {
   const lb = document.createElement("div"); lb.className = "lightbox";
   lb.innerHTML = `<div><img src="${esc(safeImg(el.querySelector("img").getAttribute("src")))}"><p>${esc(el.dataset.cap)}</p></div>`;
   lb.onclick = () => lb.remove(); document.body.appendChild(lb);
 };
-const LVL = { warn: "إنذار أول", restart: "إغلاق ومسح الإجابات", fail: "غلق نهائي ورسوب" };
+const LVL = { warn: "إنذار", restart: "إغلاق ومسح الإجابات", fail: "غلق نهائي ورسوب" };
 export function timelineHtml(a) {
   const ev = [{ at: a.startedAtMs, t: "بدأ الاختبار", c: "s" },
   ...(a.violations || []).map(v => ({ at: v.at, t: `🚨 ${v.type}${v.level ? ` ← ${LVL[v.level] || ""}` : ""}`, c: "v" })),
@@ -86,11 +88,12 @@ export function resultRow(a, i) {
     "عدد الأسئلة المُجاب عنها": Object.keys(a.answers || {}).length,
     "الحالة": statusText(a), "عدد محاولات الغش": a.violationCount || 0, "مرات إعادة الاختبار": a.restarts || 0, "مخالفات ثانوية": nflags(a),
     "تفاصيل محاولات الغش": (a.violations || []).map(v => `${fmtTime(v.at)}: ${v.type}`).join(" | "),
+    "نوع الجهاز": a.device ? deviceText(a.device) : "", "المتصفح الآمن SEB": a.seb ? "نعم" : "لا",
     "الموقع": a.location ? (a.location.address || `${a.location.lat}, ${a.location.lng}`) : (a.locationError || "غير متاح"),
     "رابط الخريطة": mapLink(a), "وقت البدء": fmtDateTime(a.startedAtMs), "وقت التسليم": fmtDateTime(a.submittedAtMs)
   };
 }
-export const RES_W = [5, 11, 28, 10, 20, 20, 8, 10, 9, 14, 12, 22, 10, 10, 10, 50, 40, 36, 18, 18];
+export const RES_W = [5, 11, 28, 10, 20, 20, 8, 10, 9, 14, 12, 22, 10, 10, 10, 50, 40, 12, 40, 36, 18, 18];
 export function sheet(rows, widths) {
   const ws = XLSX.utils.json_to_sheet(rows.length ? rows : [{ "—": "لا توجد بيانات" }]);
   if (widths) ws["!cols"] = widths.map(w => ({ wch: w }));

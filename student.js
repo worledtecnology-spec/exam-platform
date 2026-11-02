@@ -6,15 +6,20 @@ import { firebaseConfig, SETTINGS } from "./config.js";
 import { isConfigured, normalizeName, hashStr, seededShuffle, esc, mmss, fmtDateTime, LETTERS, frameGuard, initAppCheck, brandHtml, wireLogos, geoCheck } from "./common.js";
 import { pickQuestions, isAnswered } from "./scoring.js";
 import { TYPE_LABEL } from "./parser.js";
-import { loadFaceDetector, detectFaces, faceReady } from "./face.js";
+import { loadFaceDetector, detectFaces, faceReady, loadObjectDetector, detectObjects, objectsReady } from "./face.js";
+import { startVoice, recordClip } from "./audio.js";
+import { deviceInfo, inSEB, osKind, sebSupported, sebLink, osLabel, typeLabel, SEB_DOWNLOAD } from "./device.js";
+let devInfo = null; deviceInfo().then(d => devInfo = d).catch(() => { });
 import { mountGuide } from "./guide.js";
 import { STUDENT_GUIDE } from "./guide-content.js";
+import { pledgeClauses, PLEDGE_VER } from "./pledge.js";
 
 const $ = id => document.getElementById(id);
 const PEN = SETTINGS.penalties && SETTINGS.penalties.length ? SETTINGS.penalties : ["warn", "restart", "fail"];
 const PEN_TEXT = { warn: "إنذار أحمر وتكمل الاختبار", restart: "إغلاق الاختبار ومسح جميع إجاباتك ثم تبدأ من جديد", fail: "غلق نهائي و<b>رسوب في الاختبار</b>" };
 const ORD = ["الأولى", "الثانية", "الثالثة", "الرابعة", "الخامسة"];
-const MAIN_SCREENS = ["scrLoading", "scrConfig", "scrLogin", "scrRules", "scrWait", "scrRestart", "scrDone", "scrFail", "scrBlocked", "scrGuide", "scrContact"];
+const ORDM = ["أول", "ثانٍ", "ثالث", "رابع", "خامس"];
+const MAIN_SCREENS = ["scrLoading", "scrConfig", "scrLogin", "scrRules", "scrWait", "scrRestart", "scrDone", "scrFail", "scrBlocked", "scrSEB", "scrPledge", "scrGuide", "scrContact"];
 let loggedIn = false, lastMain = "scrLogin";
 function show(id) {
   MAIN_SCREENS.forEach(s => $(s).classList.toggle("hidden", s !== id));
@@ -29,7 +34,7 @@ function show(id) {
   $("hero").classList.toggle("hidden", inExam);
   $("sMain").classList.toggle("hidden", inExam);
   $("credits").classList.toggle("hidden", inExam);
-  const st = { scrLogin: 0, scrRules: 1, scrWait: 1, scrRestart: 2, scrDone: 2, scrFail: 2, scrBlocked: 2 }[id];
+  const st = { scrLogin: 0, scrPledge: 1, scrRules: 1, scrWait: 1, scrRestart: 2, scrDone: 2, scrFail: 2, scrBlocked: 2 }[id];
   document.querySelectorAll("#steps li").forEach((s, i) => { s.classList.toggle("on", st !== undefined && i <= st); s.classList.toggle("done", st !== undefined && i < st); });
   window.scrollTo(0, 0);
 }
@@ -51,7 +56,11 @@ let deviceId = ""; // = هوية الطالب المجهولة في Firebase (ث
 frameGuard();
 const params = new URLSearchParams(location.search);
 const isTouch = matchMedia("(pointer:coarse)").matches;
-const noBack = () => !!(exam && (exam.noBack || exam.perQSec > 0));
+// التنقل حر دائمًا: الطالب يرجع لأي سؤال ويعدّل إجابته حتى يسلّم الاختبار
+const noBack = () => false;
+// رصد الكلام بالميكروفون: مفعّل مع الكاميرا ما لم يُعطّله المشرف لهذا الاختبار
+const micOn = () => !!(exam && exam.camera && exam.mic !== false);
+let micOk = false, voice = null, talkCount = 0, clipP = null, camLostShown = false, camErr = "";
 
 // ---------------------------------------------------------------- boot
 (async function boot() {
@@ -182,6 +191,8 @@ $("btnNext").onclick = async () => {
   if (!e.active) return loginError("هذا الاختبار مغلق الآن.");
   if (e.groupGate && !(e.openGroups || []).map(String).includes(String(me.group)))
     return loginError(`⏳ الاختبار غير مفتوح للمجموعة ${me.group} الآن. انتظر حتى يفتحه المشرف لمجموعتك ثم اضغط «متابعة» مرة أخرى.`);
+  // المتصفح الآمن: إلزامي على الأجهزة التي تدعمه، والباقي يكمل بالمراقبة المشددة
+  if (e.seb && sebSupported() && !inSEB()) return showSEB(exId);
 
   const btn = $("btnNext"); btn.disabled = true; btn.textContent = "جارٍ التحقق…";
   // الاختبار داخل الكلية فقط: التحقق من موقع الطالب قبل أي شيء
@@ -221,12 +232,44 @@ $("btnNext").onclick = async () => {
 
     renderRules();
     $("agree").checked = false;
-    show("scrRules");
-    await runChecks();
+    showPledge();
   } catch (err) {
     console.error(err); loginError("تعذّر الاتصال، حاول مرة أخرى.");
   } finally { btn.disabled = false; btn.textContent = "متابعة ←"; }
 };
+// ---------------------------------------------------------------- ميثاق الاختبار
+let pledge = null;
+function showPledge() {
+  const C = pledgeClauses(exam, PEN);
+  $("plBody").innerHTML = `<p class="pl-intro">أنا الطالب/ة <b>${esc(me.name)}</b> — المجموعة <b>${esc(me.group)}</b>${me.seat ? ` — رقم الجلوس <b>${esc(me.seat)}</b>` : ""}، في اختبار <b>${esc(exam.course)} — ${esc(exam.title)}</b>، أتعهد بالآتي:</p>
+    <ol class="pl-list">${C.map(c => `<li><span class="pl-n">${c.ic}</span><div><b>${esc(c.t)}</b><p>${c.d}</p></div></li>`).join("")}</ol>
+    <p class="pl-end" id="plEnd">— نهاية الميثاق —</p>`;
+  ["plAgree", "plName", "plOk"].forEach(x => $(x).disabled = true);
+  $("plAgree").checked = false; $("plName").value = ""; $("plErr").classList.add("hidden");
+  $("plSub").textContent = "اقرأ البنود كلها بعناية — لازم توصل لآخرها عشان تقدر توقّع";
+  show("scrPledge");
+  const body = $("plBody"), t0 = Date.now(), minMs = Math.min(25000, 2500 * C.length);
+  const unlock = () => {
+    const atEnd = body.scrollTop + body.clientHeight >= body.scrollHeight - 12;
+    const left = Math.ceil((minMs - (Date.now() - t0)) / 1000);
+    if (!atEnd) return;
+    if (left > 0) { $("plSub").textContent = `خد وقتك في القراءة… التوقيع يتفتح بعد ${left} ثانية`; return; }
+    $("plSub").textContent = "✓ قرأت الميثاق — وافق ووقّع باسمك";
+    $("plAgree").disabled = false; clearInterval(pledgeT); body.onscroll = null;
+  };
+  body.onscroll = unlock; clearInterval(pledgeT); pledgeT = setInterval(unlock, 500); body.scrollTop = 0;
+}
+let pledgeT = 0;
+$("plAgree").onchange = () => { $("plName").disabled = !$("plAgree").checked; $("plOk").disabled = !$("plAgree").checked; if ($("plAgree").checked) $("plName").focus(); };
+$("plOk").onclick = async () => {
+  const typed = $("plName").value.trim().replace(/\s+/g, " ");
+  if (normalizeName(typed) !== normalizeName(me.name)) { $("plErr").textContent = `اكتب اسمك كما هو مسجل بالضبط: «${me.name}»`; $("plErr").classList.remove("hidden"); return; }
+  pledge = { v: PLEDGE_VER, at: Date.now(), name: typed, clauses: pledgeClauses(exam, PEN).length };
+  $("agree").checked = true;
+  show("scrRules");
+  await runChecks();
+};
+$("plBack").onclick = () => { clearInterval(pledgeT); show("scrLogin"); };
 $("btnBack").onclick = () => { stopCamera(); clearInterval(faceInt); show("scrLogin"); };
 
 function renderRules() {
@@ -236,11 +279,15 @@ function renderRules() {
     <span class="chip">⏱️ ${exam.duration} دقيقة</span><span class="chip blue">👤 ${esc(me.name)} — م${esc(me.group)}${me.seat ? ` — ${esc(me.seat)}` : ""}</span>`;
   const R = [];
   R.push(["⏱️", "الوقت محسوب ويُسلَّم الاختبار تلقائيًا عند انتهائه", ""]);
-  if (exam.perQSec > 0) R.push(["⏳", `لكل سؤال ${exam.perQSec} ثانية ولا يمكن الرجوع للسؤال السابق`, ""]);
-  else if (exam.noBack) R.push(["🔒", "لا يمكن الرجوع للسؤال السابق بعد الانتقال", ""]);
+  if (exam.seb) R.push(inSEB() ? ["🔒", "أنت داخل المتصفح الآمن — الجهاز مقفول على الاختبار لحد ما تسلّم", ""] : ["🛡️", "جهازك مش بيدعم المتصفح الآمن، فالاختبار هيشتغل بالمراقبة المشددة (ملء الشاشة + الكاميرا + الميكروفون)", ""]);
+  R.push(["↔️", "تقدر تتنقل بين الأسئلة وترجع لأي سؤال وتعدّل إجابتك في أي وقت قبل «تسليم الاختبار»", ""]);
   if (exam.negative > 0) R.push(["➖", "توجد درجة سالبة للإجابة الخاطئة — اترك السؤال إن لم تكن متأكدًا", ""]);
+  if (exam.camera) R.push(["📷", "الكاميرا" + (micOn() ? " والميكروفون" : "") + " لازم يفضلوا شغالين طول الاختبار — لو اتقفلوا يتوقف الاختبار ويُسجَّل غش", "red"]);
+  if (micOn()) R.push(["🎙️", "الكلام مع أي حد أثناء الاختبار بيترصد بالميكروفون ويتسجّل كدليل — تكراره = محاولة غش", "red"]);
+  if (exam.camera && exam.faceAI) R.push(["📵", "ظهور موبايل أو شخص تاني أمام الكاميرا = غش • تكرار النظر بعيدًا 3 مرات = غش", "red"]);
+  if (exam.camera) R.push(["🎧", "ممنوع السماعات (بلوتوث أو سلك) والكاميرات الافتراضية، وممنوع تصوير الشاشة أو فتح المنصة في تبويب تاني", "red"]);
   R.push(["🚫", "الخروج من صفحة الاختبار أو فتح أي تطبيق أو شاشة أخرى" + (exam.camera ? " أو الابتعاد عن الكاميرا" : "") + " = محاولة غش", "red"]);
-  R.push(["⚖️", PEN.map((p, i) => `<b>${i + 1}</b> ${({ warn: "إنذار", restart: "مسح الإجابات والبدء من جديد", fail: "رسوب" })[p]}`).join(" ← "), "red"]);
+  R.push(["⚖️", PEN.map((p, i) => `<b>${i + 1}</b> ${({ warn: "إنذار", restart: "مسح الإجابات والبدء من جديد", fail: "غلق نهائي ورسوب" })[p]}`).join(" ← "), "red"]);
   $("rulesList").innerHTML = R.map(([ic, t, c]) => `<div class="rule ${c}"><div class="ic">${ic}</div><div>${t}</div></div>`).join("");
 }
 
@@ -251,18 +298,20 @@ function renderChecks() {
     ["id", "بيانات الطالب", me.seat ? "تم التحقق من رقم الجلوس" : "تم التحقق من الاسم والمجموعة"],
     exam.geoLock ? ["geo", "داخل الكلية", checks.geo && checks.geo.ok ? `على بعد ${checks.geo.d} م من المركز` : checks.geo ? "خارج مكان الاختبار" : "…"] : ["loc", "تحديد الموقع", loc ? "تم تحديد موقعك" : "غير متاح"],
     exam.camera ? ["cam", "الكاميرا", camOk ? "تعمل بشكل سليم" : checks.cam === "wait" ? "جارٍ التشغيل…" : "مطلوبة — اسمح بالوصول للكاميرا"] : null,
+    micOn() ? ["mic", "الميكروفون", micOk ? "يعمل بشكل سليم" : checks.cam === "wait" ? "جارٍ التشغيل…" : "مطلوب — اسمح بالوصول للميكروفون"] : null,
+    exam.camera ? ["dev", "سماعات وكاميرا افتراضية", checks.devMsg || "…"] : null,
     exam.camera && exam.faceAI ? ["face", "كشف الوجه", checks.faceMsg || "…"] : null,
     ["screen", "شاشة واحدة فقط", checks.screen ? "لا توجد شاشات إضافية" : "افصل الشاشة الإضافية ثم أعد المحاولة"],
     ["net", "الاتصال بالإنترنت", navigator.onLine ? "متصل" : "غير متصل"]
   ].filter(Boolean);
   $("checks").innerHTML = rows.map(([k, t, d]) => {
-    const st = k === "id" ? true : k === "geo" ? !!(checks.geo && checks.geo.ok) : k === "loc" ? (!!loc || !SETTINGS.requireLocation) : k === "cam" ? (checks.cam === "wait" ? "wait" : camOk) : k === "face" ? checks.face : k === "net" ? navigator.onLine : checks.screen;
+    const st = k === "id" ? true : k === "geo" ? !!(checks.geo && checks.geo.ok) : k === "loc" ? (!!loc || !SETTINGS.requireLocation) : k === "cam" ? (checks.cam === "wait" ? "wait" : camOk) : k === "mic" ? (checks.cam === "wait" ? "wait" : micOk) : k === "dev" ? checks.dev !== false : k === "face" ? checks.face : k === "net" ? navigator.onLine : checks.screen;
     return `<div class="chk ${st === "wait" ? "wait" : st ? "ok" : "bad"}"><i>${st === "wait" ? "…" : st ? "✓" : "✕"}</i><div><b>${t}</b><small>${esc(d)}</small></div></div>`;
   }).join("");
   updateStartBtn();
 }
 function allChecksOk() {
-  return (!exam.geoLock || (checks.geo && checks.geo.ok)) && (!exam.camera || camOk) && (!(exam.camera && exam.faceAI) || checks.face === true) && checks.screen && navigator.onLine && (!SETTINGS.requireLocation || loc);
+  return (!exam.geoLock || (checks.geo && checks.geo.ok)) && (!exam.camera || camOk) && (!micOn() || micOk) && (!exam.camera || checks.dev !== false) && (!(exam.camera && exam.faceAI) || checks.face === true) && checks.screen && navigator.onLine && (!SETTINGS.requireLocation || loc);
 }
 function updateStartBtn() { $("btnStart").disabled = !($("agree").checked && allChecksOk()); }
 $("agree").onchange = updateStartBtn;
@@ -277,25 +326,152 @@ async function runChecks() {
   renderChecks();
 }
 async function startCamera() {
-  $("btnCamRetry").classList.add("hidden");
+  $("btnCamRetry").classList.add("hidden"); $("camHelp").classList.add("hidden");
   $("camTag").textContent = "جارٍ تشغيل الكاميرا…";
-  try {
-    camStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } }, audio: false });
-    $("camPreview").srcObject = camStream; $("camLive").srcObject = camStream;
-    camOk = true; checks.cam = true; $("camTag").textContent = "● الكاميرا تعمل";
-    camStream.getVideoTracks()[0].onended = () => { camOk = false; if (running) violation("إيقاف الكاميرا أثناء الاختبار"); };
-  } catch (e) {
-    console.error(e); camOk = false; checks.cam = false; camStream = null;
-    $("camTag").textContent = e.name === "NotAllowedError" ? "تم رفض إذن الكاميرا" : "لا توجد كاميرا متاحة";
-    $("btnCamRetry").classList.remove("hidden");
+  const video = { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } };
+  const audio = micOn() ? { echoCancellation: false, noiseSuppression: false, autoGainControl: false } : false;
+  stopCamera();
+  let err = null;
+  try { camStream = await navigator.mediaDevices.getUserMedia({ video, audio }); }
+  catch (e) {
+    err = e; camStream = null;
+    // لو الميكروفون هو المرفوض: نجرب الكاميرا وحدها لنعرف أيهما المشكلة
+    if (audio) { try { camStream = await navigator.mediaDevices.getUserMedia({ video, audio: false }); err = Object.assign(new Error("mic"), { name: e.name, mic: true }); } catch (e2) { err = e2; } }
   }
-  renderChecks();
+  const vt = camStream && camStream.getVideoTracks()[0], at = camStream && camStream.getAudioTracks()[0];
+  camOk = !!(vt && vt.readyState === "live"); micOk = !!(at && at.readyState === "live");
+  checks.cam = camOk;
+  if (camStream) { $("camPreview").srcObject = camStream; $("camLive").srcObject = camStream; $("camLive").play().catch(() => { }); }
+  if (vt) vt.onended = () => camLost("إيقاف الكاميرا أثناء الاختبار");
+  if (at) at.onended = () => camLost("إيقاف الميكروفون أثناء الاختبار");
+  await checkMediaDevices();
+  const okAll = camOk && (!micOn() || micOk);
+  if (okAll) { camErr = ""; $("camTag").textContent = micOn() ? "● الكاميرا والميكروفون يعملان" : "● الكاميرا تعمل"; }
+  else {
+    if (err) console.error(err);
+    const which = !camOk ? "الكاميرا" : "الميكروفون";
+    camErr = !err ? `${which} لا يعمل` : err.name === "NotAllowedError" || err.name === "SecurityError" ? `تم رفض إذن ${which}` : err.name === "NotReadableError" || err.name === "AbortError" ? `${which} مشغول في تطبيق آخر — اقفل أي تطبيق يستخدمه (زووم، واتساب، الكاميرا…)` : err.name === "NotFoundError" || err.name === "OverconstrainedError" ? `لا يوجد ${which === "الكاميرا" ? "كاميرا" : "ميكروفون"} في هذا الجهاز` : `تعذّر تشغيل ${which}`;
+    $("camTag").textContent = camErr;
+    $("btnCamRetry").classList.remove("hidden");
+    showCamHelp(err && (err.name === "NotAllowedError" || err.name === "SecurityError"));
+    autoRetryCamera(err && err.name);
+  }
+  renderChecksSafe();
+  return okAll;
 }
-$("btnCamRetry").onclick = async () => { checks.cam = "wait"; renderChecks(); await startCamera(); if (exam.faceAI) startFaceCheck(); };
-function stopCamera() { if (camStream) camStream.getTracks().forEach(t => t.stop()); camStream = null; camOk = false; }
+// ---- كاميرا افتراضية (OBS / ManyCam…) أو سماعة بلوتوث = ممنوع
+const VIRTUAL_CAM = /obs|virtual|manycam|xsplit|snap camera|splitcam|e2esoft|vcam|mmhmm|camtwist|youcam|webcamoid|fake ?web|nvidia broadcast/i;
+const WIRELESS = /airpods|buds|bluetooth|hands-?free|\bwh-|\bwf-|jabra|beats|bose|soundcore|earbud|tws|headset|سماع/i;
+async function checkMediaDevices() {
+  checks.dev = true; checks.devMsg = "لا توجد كاميرا افتراضية أو سماعات";
+  const vt = camStream && camStream.getVideoTracks()[0], at = camStream && camStream.getAudioTracks()[0];
+  if (vt && VIRTUAL_CAM.test(vt.label || "")) { checks.dev = false; checks.devMsg = `كاميرا افتراضية غير مسموحة (${vt.label}) — استخدم كاميرا الجهاز الحقيقية`; return checks.dev; }
+  let list = [];
+  try { list = await navigator.mediaDevices.enumerateDevices(); } catch { /* */ }
+  const hs = [at && at.label, ...list.filter(d => d.kind === "audiooutput" && d.deviceId === "default").map(d => d.label)].filter(Boolean).find(l => WIRELESS.test(l));
+  if (hs) { checks.dev = false; checks.devMsg = `افصل السماعة أولًا (${hs}) ثم اضغط «إعادة تشغيل الكاميرا»`; }
+  return checks.dev;
+}
+if (navigator.mediaDevices) navigator.mediaDevices.addEventListener?.("devicechange", async () => {
+  if (!exam || !exam.camera) return;
+  const ok = await checkMediaDevices();
+  if (running && !ok) violation("توصيل سماعة أو كاميرا افتراضية أثناء الاختبار");
+  else renderChecksSafe();
+});
+function renderChecksSafe() { if (!running && exam) { try { renderChecks(); } catch { /* شاشة أخرى */ } } }
+
+// شرح فتح الكاميرا والميكروفون حسب نوع الجهاز (المتصفح لا يسمح لأي موقع بتغيير إعدادات الجهاز بنفسه)
+function deviceKind() {
+  const ua = navigator.userAgent;
+  if (/iPhone|iPad|iPod/.test(ua) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)) return "ios";
+  if (/Android/.test(ua)) return "android";
+  if (/Mac/.test(ua)) return "mac";
+  return "win";
+}
+function showCamHelp(denied) {
+  const what = micOn() ? "الكاميرا والميكروفون" : "الكاميرا";
+  const S = {
+    android: [`اضغط على علامة 🔒 (أو ⓘ) بجوار رابط الموقع أعلى الشاشة ← «الأذونات» ← فعّل ${what}.`, `لو مش ظاهرة: إعدادات الموبايل ← التطبيقات ← Chrome ← الأذونات ← ${what} ← «السماح».`, "ارجع للصفحة — المنصة هتشغّلها تلقائيًا."],
+    ios: [`الإعدادات ← Safari (أو Chrome) ← ${what} ← «السماح».`, `أو اضغط «aA» بجوار الرابط ← إعدادات موقع الويب ← ${what} ← «السماح».`, "ارجع للصفحة واضغط «إعادة تشغيل الكاميرا»."],
+    win: [`اضغط على علامة 🔒 بجوار رابط الموقع ← فعّل ${what} ← أعد تحميل الصفحة لو طُلب منك.`, `لو لسه مقفولة: إعدادات ويندوز ← الخصوصية والأمان ← الكاميرا / الميكروفون ← فعّل «السماح للتطبيقات» و«السماح لتطبيقات سطح المكتب».`, "اقفل أي برنامج تاني بيستخدم الكاميرا (زووم، تيمز، واتساب)."],
+    mac: [`اضغط على علامة 🔒 بجوار رابط الموقع ← فعّل ${what}.`, `لو لسه مقفولة: إعدادات النظام ← الخصوصية والأمان ← الكاميرا / الميكروفون ← فعّل المتصفح.`, "اقفل أي برنامج تاني بيستخدم الكاميرا."]
+  }[deviceKind()];
+  $("camHelp").innerHTML = `<b>${denied ? "🔐 الإذن مقفول — افتحه كده:" : "🛠️ جرّب الخطوات دي:"}</b><ol>${S.map(x => `<li>${esc(x)}</li>`).join("")}</ol><small>لن يُسمح ببدء الاختبار إلا بعد تشغيل ${what}.</small>`;
+  $("camHelp").classList.remove("hidden");
+}
+// إعادة المحاولة تلقائيًا: عند تغيير الإذن من الإعدادات أو عند تحرّر الكاميرا من تطبيق آخر
+let camRetryT = 0, permWatch = false;
+function autoRetryCamera(errName) {
+  clearTimeout(camRetryT);
+  if (!permWatch && navigator.permissions && navigator.permissions.query) {
+    permWatch = true;
+    ["camera", "microphone"].forEach(n => navigator.permissions.query({ name: n }).then(st => {
+      st.onchange = () => { if (st.state === "granted" && !(camOk && (!micOn() || micOk))) startCamera().then(ok => { if (ok && running) camRestored(); }); };
+    }).catch(() => { }));
+  }
+  if (errName === "NotReadableError" || errName === "AbortError" || errName === "NotFoundError" || !errName)
+    camRetryT = setTimeout(() => { if (!(camOk && (!micOn() || micOk))) startCamera().then(ok => { if (ok && running) camRestored(); }); }, 5000);
+  document.addEventListener("visibilitychange", onVisRetry);
+}
+function onVisRetry() {
+  if (document.hidden || (camOk && (!micOn() || micOk))) return;
+  document.removeEventListener("visibilitychange", onVisRetry);
+  startCamera().then(ok => { if (ok && running) camRestored(); });
+}
+
+// أثناء الاختبار: الكاميرا أو الميكروفون اتقفلوا → محاولة غش + إيقاف الاختبار لحين تشغيلهم
+function camLost(type) {
+  if (!running || !exam.camera) return;
+  camOk = !!(camStream && camStream.getVideoTracks()[0] && camStream.getVideoTracks()[0].readyState === "live");
+  micOk = !!(camStream && camStream.getAudioTracks()[0] && camStream.getAudioTracks()[0].readyState === "live");
+  if (voice) { voice.stop(); voice = null; }
+  if (!camLostShown) { camLostShown = true; violation(type, true); }
+  if (!running) return;
+  $("warnOverlay").classList.add("hidden");
+  $("cbWhy").textContent = type;
+  $("camBlock").classList.remove("hidden");
+}
+function camRestored() {
+  camLostShown = false;
+  $("camBlock").classList.add("hidden"); enterFullscreen(); lastViol = Date.now();
+  const cl = $("camLive"); cl.srcObject = camStream; cl.play().catch(() => { });
+  startVoiceMonitor();
+  faceGrace = Date.now() + 5000;
+}
+$("cbRetry").onclick = async () => {
+  $("cbRetry").disabled = true; $("cbRetry").textContent = "جارٍ التشغيل…";
+  const ok = await startCamera();
+  $("cbRetry").disabled = false; $("cbRetry").textContent = "🔄 تشغيل الكاميرا والمتابعة";
+  if (ok) camRestored(); else $("cbWhy").textContent = camErr || "لسه مش شغالة";
+};
+
+// ---- رصد الكلام بالميكروفون
+function startVoiceMonitor() {
+  if (voice) { voice.stop(); voice = null; }
+  if (!running || !micOn() || !micOk || !camStream) return;
+  voice = startVoice(camStream, {
+    talkSec: SETTINGS.talkSec || 3,
+    onStart: () => { if (!clipP) clipP = recordClip(camStream, 6000); },
+    onTalk: onTalk
+  });
+}
+async function onTalk() {
+  if (!running) return;
+  talkCount++;
+  const per = SETTINGS.talkPerViolation || 3;
+  const clip = clipP ? await Promise.race([clipP, new Promise(r => setTimeout(() => r(null), 7000))]) : null;
+  clipP = null;
+  if (!running) return;
+  flag(`رصد صوت كلام بجوار الطالب (المرة ${talkCount})`);
+  saveEvidence("talk", `صوت كلام — المرة ${talkCount}`, clip);
+  if (talkCount % per === 0) violation(`التحدث أثناء الاختبار (تكرر رصد الكلام ${talkCount} مرات)`);
+  else toast(`🎙️ تم رصد صوت كلام — ممنوع التحدث أثناء الاختبار (${talkCount % per} من ${per})`, 4500);
+}
+function stopCamera() { if (voice) { voice.stop(); voice = null; } if (camStream) camStream.getTracks().forEach(t => { t.onended = null; t.stop(); }); camStream = null; camOk = false; micOk = false; }
 
 async function startFaceCheck() {
   checks.face = "wait"; checks.faceMsg = "جارٍ تحميل كشف الوجه بالذكاء الاصطناعي…"; renderChecks();
+  loadObjectDetector(); // يُحمَّل في الخلفية: كشف الموبايل والكتب والأشخاص
   const ok = await loadFaceDetector();
   if (!ok) { faceOn = false; checks.face = true; checks.faceMsg = "تعذّر تشغيل كشف الوجه على هذا الجهاز — ستُستخدم الصور فقط"; renderChecks(); return; }
   faceOn = true;
@@ -329,10 +505,10 @@ function snapshot() {
   g.fillText(`${me.name} • م${me.group} • ${new Date().toLocaleTimeString("ar-EG")}`, w - 6, h - 5);
   return { img: c.toDataURL("image/jpeg", 0.6), bright };
 }
-async function saveEvidence(kind, type) {
+async function saveEvidence(kind, type, audio) {
   const s = snapshot(); if (!s) return null;
   if (s.bright < 18 && kind !== "violation") flag("الكاميرا مغطاة أو الصورة مظلمة جدًا");
-  const p = addDoc(collection(db, "attempts", attemptId, "evidence"), { at: Date.now(), kind, type: type || "", img: s.img, dark: s.bright < 18 }).catch(console.error);
+  const p = addDoc(collection(db, "attempts", attemptId, "evidence"), { at: Date.now(), kind, type: type || "", img: s.img, dark: s.bright < 18, ...(audio ? { audio } : {}) }).catch(console.error);
   await Promise.race([p, new Promise(r => setTimeout(r, 4000))]);
   return s.img;
 }
@@ -363,7 +539,7 @@ $("btnStart").onclick = async () => {
     await setDoc(attemptRef, {
       examId: exam.id, examTitle: exam.title, course: exam.course, owner: exam.owner || "",
       name: me.name, nameKey: normalizeName(me.name), group: me.group, seat: me.seat || "", rosterId: exam.rosterId || "",
-      uid: deviceId, deviceId, geoLock: !!exam.geoLock, geoDist: checks.geo ? checks.geo.d : null, location: loc, locationError: locErr, camera: !!camOk, faceAI: !!(exam.faceAI && faceOn),
+      uid: deviceId, deviceId, pledge: pledge || null, device: devInfo || null, seb: inSEB(), mic: !!micOk, geoLock: !!exam.geoLock, geoDist: checks.geo ? checks.geo.d : null, location: loc, locationError: locErr, camera: !!camOk, faceAI: !!(exam.faceAI && faceOn),
       status: "in_progress", startedAt: serverTimestamp(), startedAtMs: now, durationMin: exam.duration,
       qIds, answers: {}, qPos: 0, restarts: 0, violations: [], violationCount: 0, flags: [], flagCount: 0, qCount: qIds.length,
       screen: `${screen.width}×${screen.height}`, touch: isTouch, lastSeenMs: now,
@@ -432,7 +608,7 @@ function requestReturnOther() {
 
 async function doResume(a, granted) {
   enterFullscreen();
-  if (exam.camera) { await startCamera(); if (exam.faceAI) faceOn = await loadFaceDetector(); }
+  if (exam.camera) { await startCamera(); if (exam.faceAI) { loadObjectDetector(); faceOn = await loadFaceDetector(); } }
   const upd = { lastSeenMs: Date.now() };
   if (granted) { upd.resumeUsed = a.resumeGrant || 0; upd.deviceId = deviceId; }
   updateDoc(attemptRef, upd).catch(console.error);
@@ -446,7 +622,6 @@ async function doResume(a, granted) {
   if (Date.now() >= endAt) return finalize(true);
   if (granted) toast("✓ تمت عودتك للاختبار بنفس إجاباتك");
   else violation("الخروج من صفحة الاختبار ثم العودة إليها", true);
-  if (exam.camera && !camOk) setTimeout(() => violation("الكاميرا غير مفعّلة بعد العودة للاختبار", true), 3000);
 }
 
 // ---------------------------------------------------------------- local backup (offline)
@@ -484,6 +659,9 @@ function beginExam(a) {
   qDeadline = 0; renderQ(); renderNav(); tick();
   startTimers();
   listenAttempt();
+  camLostShown = false; $("camBlock").classList.add("hidden");
+  if (exam.camera && (!camOk || (micOn() && !micOk))) setTimeout(() => camLost(!camOk ? "الكاميرا غير مفعّلة أثناء الاختبار" : "الميكروفون غير مفعّل أثناء الاختبار"), 2500);
+  else startVoiceMonitor();
 }
 function computeEnd() {
   endAt = startMs + (exam.duration + (extraMin || 0)) * 60000;
@@ -625,7 +803,7 @@ function showTimeAlert(a) {
   $("taTitle").textContent = a.title; $("taSub").textContent = a.sub;
   el.classList.remove("hidden", "warn", "low"); el.classList.add(a.lvl);
   void el.offsetWidth; el.classList.add("show");
-  alertBeep(a.lvl === "low" ? 2 : 1);
+  alertBeep(a.lvl === "low" ? 2 : 1); if (voice) voice.pause(2500);
   clearTimeout(taTimer); taTimer = setTimeout(hideTimeAlert, a.sec <= 15 ? 15000 : 7000);
 }
 function hideTimeAlert() { const el = $("timeAlert"); el.classList.remove("show"); el.classList.add("hidden"); }
@@ -665,6 +843,7 @@ function stopExam(keepCamera) {
   running = false;
   [timerInt, hbInt, snapInt, guardInt, faceInt].forEach(clearInterval); clearTimeout(saveTimer);
   hideTimeAlert(); alertsFired = null;
+  if (voice) { voice.stop(); voice = null; } $("camBlock").classList.add("hidden");
   ["warnOverlay", "confirmOverlay", "msgOverlay"].forEach(x => $(x).classList.add("hidden"));
   exitFullscreen();
   if (!keepCamera) stopCamera();
@@ -680,6 +859,7 @@ async function finalize(auto, byAdmin) {
   $("doneMsg").innerHTML = `${byAdmin ? "تم إنهاء الاختبار بواسطة المراقب وحفظ إجاباتك." : auto ? "انتهى الوقت وتم تسليم إجاباتك تلقائيًا." : "تم استلام إجاباتك."}<br>
     أجبت عن <b>${n}</b> من <b>${order.length}</b> سؤال. تم حفظ إجاباتك وإرسالها لأستاذ المقرر.`;
   show("scrDone");
+  if (inSEB()) { const q = $("sebQuit"); q.href = new URL("seb-quit.html", location.href).href; q.classList.remove("hidden"); }
   const ss = $("saveState"); ss.textContent = navigator.onLine ? "جارٍ حفظ إجاباتك…" : "⏳ في انتظار عودة الإنترنت لإرسال إجاباتك — لا تغلق الصفحة";
   try {
     await endShot;
@@ -728,7 +908,7 @@ async function violation(type, force) {
   if (!running) return;
   const now = Date.now();
   if (!force && now - lastViol < 2500) return;
-  lastViol = now; faceGrace = now + 10000;
+  lastViol = now; faceGrace = now + 10000; if (voice) voice.pause(9000);
   violations++;
   const level = PEN[Math.min(violations, PEN.length) - 1];
   const v = { type, at: now, level };
@@ -753,13 +933,14 @@ async function violation(type, force) {
     Object.assign(upd, { answers });
     updateWarnBadge();
     $("warnWhy").textContent = type;
-    const next = PEN[violations];
-    $("warnNext").innerHTML = next === "restart" ? "إذا تكررت سيتم إغلاق الاختبار ومسح جميع إجاباتك." : next === "fail" ? "إذا تكررت سيتم غلق الاختبار نهائيًا واعتبارك راسبًا." : "تم تسجيل الإنذار.";
+    const next = PEN[violations], failAt = PEN.indexOf("fail") + 1, left = failAt > 0 ? failAt - violations - 1 : 0;
+    $("warnTitle").textContent = `إنذار ${ORDM[violations - 1] || violations}!`;
+    $("warnNext").innerHTML = next === "restart" ? "إذا تكررت سيتم إغلاق الاختبار ومسح جميع إجاباتك." : next === "fail" ? "⚠️ <b>ده آخر إنذار</b> — أي مخالفة تانية = غلق الاختبار نهائيًا واعتبارك راسبًا." : `راجع نفسك والتزم بميثاق الاختبار — فاضل لك ${left === 1 ? "<b>فرصة واحدة</b>" : `<b>${left}</b> فرص`} قبل غلق الاختبار نهائيًا.`;
     $("warnOverlay").classList.remove("hidden");
     try { navigator.vibrate && navigator.vibrate([300, 120, 300]); } catch { }
   }
   try { await updateDoc(attemptRef, upd); } catch (e) { console.error(e); }
-  shot.then(img => tg(`${level === "restart" ? "🗑 إنذار ثانٍ — إغلاق ومسح الإجابات" : "🚨 محاولة غش — إنذار أول"}\n${who()}\nالسبب: ${type}`, img));
+  shot.then(img => tg(`${level === "restart" ? "🗑 إغلاق ومسح الإجابات" : `🚨 محاولة غش — إنذار ${ORDM[violations - 1] || violations}`}\n${who()}\nالسبب: ${type}`, img));
 }
 function showRestartScreen(a, type) {
   attemptData = a;
@@ -801,29 +982,83 @@ function flag(type) {
     updateDoc(attemptRef, { flags: arrayUnion(...q), flagCount: flagsSent }).catch(console.error);
   }, 1500);
 }
-$("btnResume").onclick = () => { $("warnOverlay").classList.add("hidden"); enterFullscreen(); lastViol = Date.now(); faceGrace = Date.now() + 5000; };
+$("btnResume").onclick = () => { $("warnOverlay").classList.add("hidden"); enterFullscreen(); lastViol = Date.now(); faceGrace = Date.now() + 5000; if (voice) voice.pause(4000); };
 
 // ---- كشف الوجه أثناء الاختبار
 function startFaceMonitor() {
   clearInterval(faceInt);
-  if (!(exam.camera && exam.faceAI && faceOn && faceReady())) { $("faceState").textContent = ""; return; }
-  let none = 0, multi = 0, away = 0;
+  if (!(exam.camera && exam.faceAI && ((faceOn && faceReady()) || objectsReady()))) { $("faceState").textContent = ""; if (exam.camera && exam.faceAI && !objectsReady()) loadObjectDetector().then(ok => { if (ok && running) startFaceMonitor(); }); return; }
+  let none = 0, multi = 0, away = 0, phone = 0, people = 0, book = 0, lap = 0, t = 0;
   faceInt = setInterval(() => {
     if (!running) return;
-    const r = detectFaces($("camLive")); if (!r) return;
-    const fs = $("faceState");
-    fs.textContent = r.count === 1 ? (r.away ? "👀" : "🙂") : r.count === 0 ? "❓" : "👥";
-    fs.className = "face-state " + (r.count === 1 && !r.away ? "ok" : "bad");
-    if (Date.now() < faceGrace) { none = multi = away = 0; return; }
-    none = r.count === 0 ? none + 1 : 0;
-    multi = r.count > 1 ? multi + 1 : 0;
-    away = r.count === 1 && r.away ? away + 1 : 0;
-    if (none >= (SETTINGS.faceAbsentSec || 8)) { none = 0; violation("عدم ظهور الطالب أمام الكاميرا (ترك مكانه أو غطّى الكاميرا)"); }
-    else if (multi >= (SETTINGS.faceMultiSec || 2)) { multi = 0; violation("ظهور أكثر من شخص أمام الكاميرا"); }
-    else if (away >= (SETTINGS.faceAwaySec || 5)) { away = 0; flag("النظر بعيدًا عن الشاشة لفترة"); }
+    t++;
+    const grace = Date.now() < faceGrace;
+    const r = faceOn && faceReady() ? detectFaces($("camLive")) : null;
+    if (r) {
+      const fs = $("faceState");
+      fs.textContent = r.count === 1 ? (r.away ? "👀" : "🙂") : r.count === 0 ? "❓" : "👥";
+      fs.className = "face-state " + (r.count === 1 && !r.away ? "ok" : "bad");
+      if (grace) { none = multi = away = 0; }
+      else {
+        none = r.count === 0 ? none + 1 : 0;
+        multi = r.count > 1 ? multi + 1 : 0;
+        away = r.count === 1 && r.away ? away + 1 : 0;
+        if (none >= (SETTINGS.faceAbsentSec || 6)) { none = 0; violation("عدم ظهور الطالب أمام الكاميرا (ترك مكانه أو غطّى الكاميرا)"); }
+        else if (multi >= (SETTINGS.faceMultiSec || 2)) { multi = 0; violation("ظهور أكثر من شخص أمام الكاميرا"); }
+        else if (away >= (SETTINGS.faceAwaySec || 4)) {
+          away = 0; awayCount++;
+          const per = SETTINGS.awayPerViolation || 3;
+          flagEv(`النظر بعيدًا عن الشاشة (المرة ${awayCount})`);
+          if (awayCount % per === 0) violation(`تكرار النظر بعيدًا عن الشاشة (${awayCount} مرات)`);
+          else toast(`👀 ركّز في شاشتك — تم رصد النظر بعيدًا (${awayCount % per} من ${per})`, 3500);
+        }
+      }
+    }
+    // كل ثانيتين: البحث عن موبايل / كتاب / شخص آخر / جهاز آخر أمام الكاميرا
+    if (t % 2 === 0 && objectsReady()) {
+      const o = detectObjects($("camLive"));
+      if (o && !grace) {
+        phone = o.phone ? phone + 1 : 0;
+        people = o.persons > 1 ? people + 1 : 0;
+        book = o.book ? book + 1 : 0;
+        lap = o.laptop ? lap + 1 : 0;
+        if (phone >= 2) { phone = 0; violation("ظهور موبايل أمام الكاميرا"); }
+        else if (people >= 2) { people = 0; violation("وجود شخص آخر بجوار الطالب"); }
+        else if (book >= 3) { book = 0; flagEv("ظهور كتاب أو ورق أمام الكاميرا"); }
+        else if (lap >= 3) { lap = 0; flagEv("ظهور جهاز آخر (لابتوب/تابلت) أمام الكاميرا"); }
+      }
+    }
   }, 1000);
 }
+let awayCount = 0, lastFlagEv = 0;
+// مخالفة ثانوية + صورة دليل (صورة كل 20 ثانية على الأكثر لتوفير المساحة)
+function flagEv(type) {
+  flag(type);
+  if (exam && exam.camera && Date.now() - lastFlagEv > 20000) { lastFlagEv = Date.now(); saveEvidence("flag", type); }
+}
 
+// فتح المنصة في تبويب أو نافذة أخرى أثناء الاختبار
+try {
+  const bc = new BroadcastChannel("exam-platform-tabs");
+  bc.onmessage = e => { if (running && e.data === "hello") { violation("فتح المنصة في تبويب أو نافذة أخرى أثناء الاختبار"); bc.postMessage("busy"); } else if (!running && e.data === "busy") blocked("⛔", "الاختبار مفتوح في تبويب آخر", "لا يُسمح بفتح المنصة في أكثر من تبويب أثناء الاختبار. ارجع للتبويب الأصلي."); };
+  bc.postMessage("hello");
+} catch { /* متصفح قديم */ }
+// إخفاء الأسئلة فور فقدان التركيز (يُفسد لقطات الشاشة والنوافذ الجانبية)
+const setUnfocused = on => document.body.classList.toggle("unfocused", !!(on && running));
+window.addEventListener("blur", () => setUnfocused(true));
+window.addEventListener("focus", () => setUnfocused(false));
+document.addEventListener("visibilitychange", () => setUnfocused(document.hidden));
+// إضافات المتصفح التي تحقن محتوى في الصفحة (مساعدات الذكاء الاصطناعي، المترجمات…)
+const OWN = new Set([...document.body.children]);
+let injSeen = 0;
+new MutationObserver(ms => {
+  if (!running) return;
+  for (const m of ms) for (const n of m.addedNodes) {
+    if (n.nodeType !== 1 || OWN.has(n) || /^(SCRIPT|STYLE|LINK)$/.test(n.nodeName)) continue;
+    if (n.parentNode !== document.body && n.parentNode !== document.documentElement) continue;
+    if (injSeen++ < 5) flagEv(`إضافة في المتصفح تتدخل في صفحة الاختبار (${(n.id || n.nodeName).toString().slice(0, 40)})`);
+  }
+}).observe(document.documentElement, { childList: true, subtree: true });
 document.addEventListener("visibilitychange", () => { if (document.hidden) violation("مغادرة صفحة الاختبار (فتح تطبيق أو تبويب أو شاشة أخرى)"); });
 window.addEventListener("blur", () => setTimeout(() => { if (running && !document.hasFocus()) violation("الانتقال إلى نافذة أو برنامج آخر"); }, 400));
 document.addEventListener("fullscreenchange", () => {
@@ -840,11 +1075,29 @@ window.addEventListener("resize", () => {
     else if (innerWidth > base.w) base = { w: innerWidth, h: innerHeight };
   }, 700);
 });
+// صورة الكاميرا ثابتة تمامًا (صورة أو فيديو مزيف أو كاميرا متجمدة) — الكاميرا الحقيقية فيها تشويش دائمًا
+let prevPx = null, frozenN = 0;
+function frozenCheck() {
+  const v = $("camLive"); if (!v || !v.videoWidth) return;
+  const c = frozenCheck.c || (frozenCheck.c = document.createElement("canvas")); c.width = 32; c.height = 24;
+  const g = c.getContext("2d", { willReadFrequently: true }); g.drawImage(v, 0, 0, 32, 24);
+  const px = g.getImageData(0, 0, 32, 24).data;
+  if (prevPx) { let d = 0; for (let i = 0; i < px.length; i += 4) d += Math.abs(px[i] - prevPx[i]) + Math.abs(px[i + 1] - prevPx[i + 1]); d /= (px.length / 4);
+    frozenN = d < 0.08 ? frozenN + 1 : 0;
+    if (frozenN >= 20) { frozenN = 0; violation("صورة الكاميرا ثابتة تمامًا (صورة أو فيديو مزيف أو كاميرا مغطاة)"); } }
+  prevPx = px;
+}
 function guardTick() {
   if (!running) return;
   if (SETTINGS.detectDevTools && !isTouch && !document.fullscreenElement && (outerWidth - innerWidth > 220 || outerHeight - innerHeight > 260)) violation("فتح أدوات المطوّر (Developer Tools)");
   if (SETTINGS.blockMultiScreen && window.screen && window.screen.isExtended === true) violation("توصيل شاشة إضافية أثناء الاختبار");
-  if (exam.camera && camStream) { const t = camStream.getVideoTracks()[0]; if (!t || t.readyState === "ended") { camOk = false; camStream = null; violation("إيقاف الكاميرا أثناء الاختبار"); } else if (t.muted) flag("الكاميرا لا ترسل صورة (مكتومة)"); }
+  if (exam.camera && !camLostShown) {
+    const t = camStream && camStream.getVideoTracks()[0], m = camStream && camStream.getAudioTracks()[0];
+    if (!t || t.readyState === "ended") camLost("إيقاف الكاميرا أثناء الاختبار");
+    else if (micOn() && (!m || m.readyState === "ended")) camLost("إيقاف الميكروفون أثناء الاختبار");
+    else if (t.muted) flag("الكاميرا لا ترسل صورة (مكتومة)");
+    else frozenCheck();
+  }
 }
 const setNet = () => { $("netBanner").classList.toggle("hidden", navigator.onLine); if (!navigator.onLine) flag("انقطاع الاتصال بالإنترنت"); else if (running) saveSoon(); };
 window.addEventListener("online", setNet); window.addEventListener("offline", setNet);
@@ -879,6 +1132,14 @@ function enterFullscreen() {
 function exitFullscreen() {
   fsEntered = false;
   if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(() => { });
+}
+function showSEB(exId) {
+  const k = osKind(), d = devInfo;
+  $("sebDev").textContent = d ? `${typeLabel(d.type)} — ${osLabel(d.os)}` : osLabel(k);
+  $("sebGet").href = SEB_DOWNLOAD[k] || SEB_DOWNLOAD.windows;
+  $("sebOpen").href = sebLink(exId);
+  $("sebBack").onclick = () => show("scrLogin");
+  show("scrSEB");
 }
 function blocked(ic, title, msg) {
   $("blkIc").textContent = ic; $("blkTitle").textContent = title; $("blkMsg").textContent = msg;

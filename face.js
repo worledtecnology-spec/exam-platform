@@ -45,3 +45,41 @@ export function detectFaces(video) {
   }
   return { count: dets.length, away };
 }
+
+// =====================================================================
+//  كشف الأشياء الممنوعة أمام الكاميرا (موبايل / كتاب / شخص آخر) — MediaPipe Object Detector
+// =====================================================================
+const OBJ_MODEL = "https://storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite0/float16/1/efficientdet_lite0.tflite";
+let objDet = null, objLoading = null;
+export function loadObjectDetector() {
+  if (objDet) return Promise.resolve(true);
+  if (objLoading) return objLoading;
+  objLoading = (async () => {
+    const vision = await import(LIB);
+    const files = await vision.FilesetResolver.forVisionTasks(WASM);
+    const make = delegate => vision.ObjectDetector.createFromOptions(files, {
+      baseOptions: { modelAssetPath: OBJ_MODEL, delegate }, runningMode: "IMAGE", scoreThreshold: 0.45, maxResults: 6,
+      categoryAllowlist: ["cell phone", "book", "person", "laptop", "remote"]
+    });
+    try { objDet = await make("GPU"); } catch { objDet = await make("CPU"); }
+    return true;
+  })().catch(e => { console.warn("object detector unavailable", e); objLoading = null; return false; });
+  return objLoading;
+}
+export const objectsReady = () => !!objDet;
+// يرجع { phone, book, persons, laptop } — phone يشمل «remote» لأن الموبايل في اليد يُصنَّف أحيانًا كريموت
+export function detectObjects(video) {
+  if (!objDet || !video || !video.videoWidth || video.readyState < 2) return null;
+  let res;
+  try { res = objDet.detect(video); } catch (e) { console.warn(e); return null; }
+  const out = { phone: 0, book: 0, persons: 0, laptop: 0 };
+  ((res && res.detections) || []).forEach(d => {
+    const c = d.categories && d.categories[0]; if (!c) return;
+    if (c.categoryName === "cell phone" && c.score >= 0.5) out.phone++;
+    else if (c.categoryName === "remote" && c.score >= 0.6) out.phone++;
+    else if (c.categoryName === "book" && c.score >= 0.5) out.book++;
+    else if (c.categoryName === "person" && c.score >= 0.55) out.persons++;
+    else if (c.categoryName === "laptop" && c.score >= 0.6) out.laptop++;
+  });
+  return out;
+}
