@@ -4,11 +4,11 @@ import { getFirestore, collection, doc, getDoc, getDocs, setDoc, onSnapshot, wri
 import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut, createUserWithEmailAndPassword, sendPasswordResetEmail }
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { firebaseConfig, SETTINGS, SUPER_ADMINS, SUPER_NAME } from "./config.js";
-import { isConfigured, esc, fmtDateTime, fmtTime, mmss, LETTERS, frameGuard, initAppCheck, sid, num, normalizeName } from "./common.js";
+import { isConfigured, esc, fmtDateTime, fmtTime, mmss, LETTERS, frameGuard, initAppCheck, sid, num, normalizeName, geoCheck } from "./common.js";
 import { parseWordText, parseRows, wordHtmlToText, TYPE_LABEL, LEVEL_LABEL, splitAccepted, normAr } from "./parser.js";
 import { questionsOf, answerText, correctText, isAnswered } from "./scoring.js";
 import { gradeOf, isExpired, isFinished, computeReport } from "./analytics.js";
-import { printGradeSheet, printCheatReport } from "./print.js";
+import { printGradeSheet, printCheatReport, printCheatersList } from "./print.js";
 import { deviceText } from "./device.js";
 import { $, S, hooks, scoreOf, passOf, nflags, pctColor, mapLink, byName, statusBadge, warnBadge, toast, loadEvidence, shotsHtml, timelineHtml, resultRow, RES_W, sheet, safeName } from "./admin-shared.js";
 import { initReports, renderReports } from "./reports.js";
@@ -104,6 +104,7 @@ document.querySelectorAll("[data-tab]").forEach(b => b.onclick = () => {
   document.querySelectorAll(".tab").forEach(t => t.classList.toggle("hidden", t.id !== "tab-" + b.dataset.tab));
   if (b.dataset.tab === "live") markRead();
   if (b.dataset.tab === "results") renderResults();
+  if (b.dataset.tab === "breaches") renderBreaches();
   if (b.dataset.tab === "reports") renderReports();
   if (b.dataset.tab === "guide" && !guideMounted) { mountGuide($("adminGuide"), ADMIN_GUIDE, "دليل استخدام المنصة للمشرف والمعلم"); guideMounted = true; }
   if (b.dataset.tab === "messages") renderMessages();
@@ -182,13 +183,16 @@ setInterval(() => { if (curTab() === "live") { renderRunning(); renderRequests()
 function renderAll() {
   renderStats(); renderRunning(); renderRequests(); renderFeed(); renderExams(); updatePending();
   if (groupsModalId) renderGroupsModal();
+  if (subModalId) renderSubmitStatus();
   if (curTab() === "results") renderResults();
+  if (curTab() === "breaches") renderBreaches(); else updateBrCount();
   if (curTab() === "reports") { clearTimeout(repTimer); repTimer = setTimeout(() => { if (!document.querySelector("#ppOut")) renderReports(); }, 1200); }
 }
 const myAttempts = () => Object.values(S.attempts).filter(a => S.me.isSuper || isMine(S.exams[a.examId]) || a.owner === S.me.email);
 
 // ======================================================= التنبيهات
-const LV = { warn: ["danger", "🚨 محاولة غش — إنذار أول"], restart: ["danger", "🗑 إنذار ثانٍ — أُغلق اختباره ومُسحت إجاباته"], fail: ["lock", "⛔ رسوب — غلق نهائي بسبب الغش"] };
+const LV = { record: ["danger", "🚨 خرق مسجّل (بدون إخراج الطالب)"], warn: ["danger", "🚨 محاولة غش — إنذار أول"], restart: ["danger", "🗑 إنذار ثانٍ — أُغلق اختباره ومُسحت إجاباته"], fail: ["lock", "⛔ رسوب — غلق نهائي بسبب الغش"] };
+const flagNotified = {};
 function detectEvents(old, a) {
   const who = `${a.name} — مجموعة ${a.group}${a.seat ? " — جلوس " + a.seat : ""}`;
   if (!old) { if (a.status === "in_progress") notify("info", "🟢 بدأ طالب الاختبار", `${who}\n${a.course}`, a.id, false); return; }
@@ -196,6 +200,12 @@ function detectEvents(old, a) {
     const v = (a.violations || []).slice(-1)[0] || {};
     const [kind, title] = LV[v.level] || (a.status === "locked" ? LV.fail : LV.warn);
     notify(kind, title, `${who}\nالسبب: ${v.type || a.lockedReason || ""}`, a.id, true);
+  } else if ((a.flagCount || 0) > (old.flagCount || 0)) {
+    const f = (a.flags || []).slice(-1)[0] || {};
+    if (SETTINGS.notifyFlags && /^🔎|النظر|كلام|موبايل|شخص|سماعة|كاميرا|كتاب|جهاز/.test(f.type || "") && Date.now() - (flagNotified[a.id] || 0) > 15000) {
+      flagNotified[a.id] = Date.now();
+      notify("flag", "🔎 سلوك مسجّل", `${who}\n${String(f.type || "").replace(/^🔎\s*/, "")}`, a.id, false);
+    }
   } else if ((a.resumeReq || 0) > (old.resumeReq || 0)) {
     notify("warn", "⏳ طلب عودة للاختبار", `${who}\nافتح «طلبات العودة» للسماح له`, a.id, true);
   } else if (old.status !== a.status && a.status === "submitted") {
@@ -286,14 +296,15 @@ function renderRunning() {
 function renderFeed() {
   const items = [];
   myAttempts().forEach(a => {
-    (a.violations || []).forEach(v => items.push({ at: v.at, kind: v.level === "fail" || (!v.level && a.status === "locked") ? "lock" : "danger", a, text: v.type + (v.level ? ` ← ${({ warn: "إنذار", restart: "إغلاق ومسح الإجابات", fail: "رسوب" })[v.level]}` : "") }));
+    (a.violations || []).forEach(v => items.push({ at: v.at, kind: v.level === "fail" || (!v.level && a.status === "locked") ? "lock" : "danger", a, text: v.type + (v.level ? ` ← ${({ record: "خرق مسجّل", warn: "إنذار", restart: "إغلاق ومسح الإجابات", fail: "رسوب" })[v.level]}` : "") }));
     if (a.status === "submitted" && a.submittedAtMs) items.push({ at: a.submittedAtMs, kind: "ok", a, text: a.endedByAdmin ? "أنهى المراقب اختباره" : a.autoSubmitted ? "تم التسليم تلقائيًا بانتهاء الوقت" : "تم تسليم الاختبار" });
     if (a.startedAtMs) items.push({ at: a.startedAtMs, kind: "info", a, text: "بدأ الاختبار" + (a.location ? "" : " — بدون تحديد موقع") + (a.camera ? " — الكاميرا مفعّلة" : "") });
     if (a.resumeReq) items.push({ at: a.resumeReq, kind: "warn", a, text: "طلب العودة للاختبار" });
+    (a.flags || []).forEach(f => { if (/^🔎|النظر|كلام|موبايل|شخص|سماعة|كاميرا|كتاب|جهاز/.test(f.type)) items.push({ at: f.at, kind: "flag", a, text: String(f.type).replace(/^🔎\s*/, "") }); });
   });
   items.sort((x, y) => y.at - x.at);
-  const ic = { lock: "⛔", danger: "🚨", ok: "✅", info: "🟢", warn: "⏳" };
-  const tt = { lock: "رسوب بسبب الغش", danger: "محاولة غش", ok: "تسليم", info: "دخول", warn: "طلب عودة" };
+  const ic = { lock: "⛔", danger: "🚨", ok: "✅", info: "🟢", warn: "⏳", flag: "🔎" };
+  const tt = { lock: "رسوب بسبب الغش", danger: "محاولة غش", ok: "تسليم", info: "دخول", warn: "طلب عودة", flag: "سلوك مسجّل" };
   $("feed").innerHTML = items.length ? items.slice(0, 150).map(it => `
     <div class="feed-item ${it.kind === "warn" ? "danger" : it.kind}" style="cursor:pointer;${it.at > seenAlerts && (it.kind === "danger" || it.kind === "lock") ? "background:#fff8f9" : ""}" data-act="detail" data-arg="${esc(it.a.id)}">
       <div class="fi">${ic[it.kind]}</div>
@@ -393,6 +404,7 @@ window.__detail = async id => {
         <dt>الحالة</dt><dd>${statusBadge(a)} ${num(a.restarts) ? `<span class="badge b-w1">أُعيد ${num(a.restarts)}×</span>` : ""}</dd>
         <dt>الدرجة</dt><dd>${sc ? `<span class="score">${sc.s} <small>/ ${sc.t}</small></span> (${sc.pct}%) — <b style="color:${gr.color}">${gr.label}</b>${sc.pending ? ` <span class="badge b-run">${sc.pending} مقالي ينتظر التصحيح</span>` : ""}` : "—"}</dd>
         <dt>البدء / التسليم</dt><dd>${fmtDateTime(a.startedAtMs)} ← ${fmtDateTime(a.submittedAtMs)}${a.extraMin ? ` • وقت إضافي ${num(a.extraMin)} د` : ""}</dd>
+        <dt>الخروقات والإجراء</dt><dd>${num(a.violationCount)} خرق • ${nflags(a)} ملاحظة — ${decBadge(a)} <button class="btn gold sm" data-act="decide" data-arg="${esc(a.id)}">⚖️ تحديد الإجراء</button></dd>
         <dt>ميثاق الاختبار</dt><dd>${a.pledge ? `<b style="color:var(--ok)">✍️ وقّع بالموافقة</b> باسم «${esc(a.pledge.name)}» — ${fmtDateTime(a.pledge.at)}` : `<span style="color:var(--muted)">لا يوجد توقيع مسجل</span>`}</dd>
         <dt>الجهاز</dt><dd>${a.device ? `${esc(deviceText(a.device))}<br><small style="color:var(--muted)">الشاشة ${esc(a.device.screen || "")}${a.camera ? " • 📷 كاميرا" : ""}${a.mic ? " • 🎙️ ميكروفون" : ""}</small>` : "—"}</dd>
         <dt>الموقع</dt><dd>${a.geoLock ? `<b style="color:var(--ok)">📍 داخل الكلية</b>${a.geoDist != null ? ` (يبعد ${num(a.geoDist)} م عن المركز)` : ""}<br>` : ""}${a.location ? `<a href="${mapLink(a)}" target="_blank" rel="noopener">📍 فتح على الخريطة</a><br><small style="color:var(--muted)">${esc(a.location.address || `${a.location.lat}, ${a.location.lng}`)} (±${num(a.location.accuracy)}م)</small>` : `<span style="color:var(--danger)">${esc(a.locationError || "غير متاح")}</span>`}</dd>
@@ -407,6 +419,7 @@ window.__detail = async id => {
       <h4 style="margin:1.2rem 0 .6rem;color:var(--ink)">🕒 السجل الزمني (${num(a.violationCount)} محاولة غش • ${nflags(a)} ثانوية)</h4>
       ${timelineHtml(a)}
       <div style="display:flex;gap:.6rem;margin-top:1.5rem;flex-wrap:wrap;border-top:1px solid var(--line);padding-top:1.2rem">
+        ${a.status === "locked" ? `<button class="btn ok sm" id="mUnlock">↩️ إلغاء الرسوب والسماح بالعودة بنفس الإجابات</button>` : ""}
         <button class="btn gold sm" id="mCheat">🧾 طباعة محضر الغش</button>
         <button class="btn danger sm" id="mReset">↺ السماح له بإعادة الاختبار من الصفر</button>
         ${a.status !== "locked" ? `<button class="btn ghost sm" style="color:var(--danger)" data-act="failNow" data-arg="${esc(a.id)}">⛔ اعتباره راسبًا (غش)</button>` : ""}
@@ -418,6 +431,13 @@ window.__detail = async id => {
   $("mReset").onclick = async () => {
     if (!confirm(`حذف محاولة «${a.name}» وأدلتها والسماح له بالدخول من جديد؟`)) return;
     try { await deleteAttempts([a]); closeModal(); toast("ok", "✓ تم", `يمكن الآن لـ ${a.name} دخول الاختبار من جديد.`); } catch (e) { permError(e); }
+  };
+  if ($("mUnlock")) $("mUnlock").onclick = async () => {
+    if (!confirm(`إلغاء رسوب «${a.name}» والسماح له بالعودة لاختباره بنفس إجاباته؟\n(مثلًا لو خرج بالغلط بسبب مكالمة أو مشكلة في الجهاز)\n\nيفتح الطالب رابط الاختبار بنفس بياناته ويضغط «متابعة». الوقت محسوب من بداية الاختبار — أضف له وقتًا لو احتاج.`)) return;
+    try {
+      await updateDoc(doc(db, "attempts", id), { status: "in_progress", failed: false, lockedReason: "", submittedAtMs: null, resumeGrant: (a.resumeGrant || 0) + 1, unlockedBy: S.me.email, unlockedAtMs: Date.now() });
+      closeModal(); toast("ok", "✓ تم إلغاء الرسوب", `${a.name} يقدر يرجع لاختباره دلوقتي بنفس إجاباته.`);
+    } catch (err) { permError(err); }
   };
   $("mCheat").onclick = async () => {
     const list = await loadEvidence(id);
@@ -535,7 +555,7 @@ $("btnPublish").onclick = async () => {
       negative: +$("nNeg").value, perQSec: 0, noBack: false, mic: $("nCam").value === "1" && $("nMic").value === "1", seb: $("nSeb").value === "1",
       shuffle: $("nShuffle").value === "1", shuffleOptions: $("nShuffleOpt").value === "1",
       camera: $("nCam").value === "1", faceAI: $("nCam").value === "1" && $("nFace").value === "1", active: true,
-      hallLock: $("nHall").value === "1",
+      hallLock: false, violPenalty: 0,
       geoLock: $("nGeo").value === "1", geo: { ...SETTINGS.geoFence, radius: Math.max(20, parseInt($("nRadius").value, 10) || SETTINGS.geoFence.radius) },
       rosterId: $("nRoster").value || "", owner: S.me.email, ownerName: S.me.name, notifyChat: S.me.tgChat || "",
       qCount: questions.length, totalPoints: questions.reduce((s, q) => s + q.points, 0),
@@ -569,11 +589,12 @@ function renderExams() {
       <div class="course">${esc(e.course)}${S.me.isSuper && e.ownerName ? ` <small style="color:var(--muted);font-weight:600">• ${esc(e.ownerName)}</small>` : ""}</div><h4>${esc(e.title)}</h4>
       <div class="row"><span class="chip blue">📝 ${n} سؤال</span><span class="chip blue">⏱️ ${e.duration} د</span><span class="chip blue">✔ ${e.passMark || 50}%</span>${e.camera ? `<span class="chip">📷${e.faceAI ? " 🤖" : ""}</span>` : ""}${e.geoLock ? `<span class="chip">📍 ${(e.geo && e.geo.place) ? esc(e.geo.place) : "داخل الكلية"} (${num((e.geo || {}).radius, 300)}م)</span>` : ""}${e.hallLock ? `<span class="chip">🏫 رمز القاعة</span>` : ""}${e.rosterId ? `<span class="chip">👥 ${esc(S.rosters[e.rosterId]?.name || "كشف")}</span>` : ""}${e.negative ? `<span class="chip">➖ سالب</span>` : ""}${e.camera && e.mic !== false ? `<span class="chip">🎙️ رصد الكلام</span>` : ""}${e.seb ? `<span class="chip">🔒 متصفح آمن</span>` : ""}</div>
       <div class="row"><span class="badge ${e.active ? "b-ok" : "b-w0"}">${!e.active ? "○ مغلق" : e.groupGate ? `● مفتوح لـ ${(e.openGroups || []).length ? "م " + sortGroups(e.openGroups).join("، ") : "لا مجموعة"}` : "● مفتوح للطلاب"}</span>${windowText(e)}<span class="badge b-w0">👥 ${A.length}</span>${A.some(a => a.violationCount) ? `<span class="badge b-w2">⚠️ ${A.filter(a => a.violationCount).length}</span>` : ""}</div>
+      <div class="row sub-row"><span class="badge b-ok">✅ ${A.filter(a => a.status === "submitted").length} سلّم</span><span class="badge b-run">✍️ ${A.filter(a => a.status === "in_progress" || a.status === "suspended").length} لسه بيحل</span>${A.filter(a => a.status === "locked").length ? `<span class="badge b-lock">⛔ ${A.filter(a => a.status === "locked").length}</span>` : ""}<button class="btn primary sm" data-act="subStatus" data-arg="${esc(e.id)}">📊 مين سلّم ومين لسه</button></div>
       <div class="acts">
         <button class="btn ${e.active ? "ghost" : "ok"} sm" data-act="toggle" data-arg="${esc(e.id)}">${e.active ? "⏸ إغلاق" : "▶ فتح"}</button>
         <button class="btn ${e.groupGate ? "gold" : "ghost"} sm" data-act="groups" data-arg="${esc(e.id)}">👥 المجموعات</button>
         <button class="btn primary sm" data-act="qr" data-arg="${esc(e.id)}">🔗 الرابط و QR</button>
-        <button class="btn gold sm" data-act="hall" data-arg="${esc(e.id)}" title="عرض رمز القاعة وتحديد مكان القاعة">🏫 القاعة</button>
+        <button class="btn gold sm" data-act="hall" data-arg="${esc(e.id)}" title="تحديد موقع القاعة">📍 موقع القاعة</button>
         <button class="btn ghost sm" data-act="edit" data-arg="${esc(e.id)}" title="تعديل الإعدادات ونسبة النجاح">⚙️ تعديل</button>
         <button class="btn ghost sm btn-del" data-act="del" data-arg="${esc(e.id)}" title="حذف الاختبار نهائيًا">🗑 حذف</button>
         <div class="dropdown"><button class="btn ghost sm" data-act="dd" data-this="1">⋯ المزيد</button><div class="dd-menu">
@@ -662,28 +683,33 @@ const newCode = () => { const a = new Uint32Array(1); crypto.getRandomValues(a);
 window.__hall = async id => {
   const e = S.exams[id];
   const f = document.createElement("div"); f.className = "hall-full";
-  f.innerHTML = `<div class="hf-top"><div><small>🏫 رمز دخول القاعة</small><h2>${esc(e.course)} — ${esc(e.title)}</h2></div><button class="btn ghost sm" id="hfClose">✕ إغلاق</button></div>
-    <div class="hf-main">
-      <div class="hf-code-wrap ${e.hallLock ? "" : "off"}">
+  f.innerHTML = `<div class="hf-top"><div><small>${e.hallLock ? "🏫 رمز دخول القاعة" : "📍 موقع القاعة"}</small><h2>${esc(e.course)} — ${esc(e.title)}</h2></div><button class="btn ghost sm" id="hfClose">✕ إغلاق</button></div>
+    <div class="hf-main ${e.hallLock ? "" : "loc-only"}">
+      <div class="hf-code-wrap ${e.hallLock ? "" : "hidden"}">
         <p class="hf-lead">${e.hallLock ? "اكتب الرمز ده في خانة «رمز القاعة» عشان تدخل الاختبار" : "رمز القاعة غير مفعّل لهذا الاختبار"}</p>
         <div class="hf-code" id="hfCode">${e.hallLock ? "······" : "—"}</div>
         <div class="hf-bar"><i id="hfBar"></i></div><small class="hf-sub" id="hfSub">${e.hallLock ? "جارٍ التجهيز…" : ""}</small>
-        ${e.hallLock ? "" : `<button class="btn gold" id="hfEnable">🏫 تفعيل رمز القاعة لهذا الاختبار</button>`}
       </div>
       <div class="hf-side">
-        <h3>📍 مكان الاختبار</h3>
-        <p>قف داخل القاعة واضغط الزر — المنصة تقفل الاختبار على مكانك الحالي بنصف القطر اللي تختاره.</p>
+        <label class="hf-toggle"><button type="button" class="switch ${e.hallLock ? "on" : ""}" id="hfCodeSw" aria-label="رمز القاعة"></button><div><b>🏫 رمز القاعة</b><small>${e.hallLock ? "مفعّل — الطالب لازم يكتب الرقم المعروض" : "غير مفعّل — الدخول بالموقع فقط"}</small></div></label>
+        <h3>📍 تحديد موقع القاعة</h3>
+        <p>قف <b>داخل القاعة</b> (يفضل في نصها) واضغط الزر — المنصة تقفل الاختبار على مكانك الحالي، ومش هيدخل غير الطالب اللي موقعه جوه المسافة اللي تختارها.</p>
         <label class="field"><span>اسم القاعة</span><input class="input" id="hfPlace" value="${esc((e.geo && e.geo.place) || "")}" placeholder="مثلًا: معمل 3 — الدور الثاني"></label>
         <label class="field"><span>نصف القطر المسموح</span><select class="input" id="hfR">${[20, 30, 50, 80, 150, 300].map(r => `<option value="${r}" ${num((e.geo || {}).radius, 300) == r ? "selected" : ""}>${r} متر${r <= 30 ? " (قاعة صغيرة)" : r <= 80 ? " (قاعة / مدرج)" : r === 300 ? " (الكلية كلها)" : ""}</option>`).join("")}</select></label>
         <button class="btn primary" id="hfHere">📍 اجعل موقعي الحالي هو مكان الاختبار</button>
+        <button class="btn ghost" id="hfTest" type="button">🧪 جرّب: هل المكان اللي أنا فيه دلوقتي مسموح؟</button>
         <small id="hfMsg" class="hf-msg">${e.geoLock ? `مفعّل حاليًا: ${esc((e.geo && e.geo.place) || "الكلية")} — ${num((e.geo || {}).radius, 300)} متر` : "قفل المكان غير مفعّل لهذا الاختبار"}</small>
       </div>
     </div>`;
   document.body.appendChild(f);
-  document.documentElement.requestFullscreen?.().catch(() => { });
+  if (e.hallLock) document.documentElement.requestFullscreen?.().catch(() => { });
   const stop = () => { clearInterval(hallTimer); clearInterval(hallTick); f.remove(); if (document.fullscreenElement) document.exitFullscreen().catch(() => { }); };
   f.querySelector("#hfClose").onclick = stop;
-  f.querySelector("#hfEnable")?.addEventListener("click", async () => { try { await updateDoc(doc(db, "exams", id), { hallLock: true }); S.exams[id].hallLock = true; stop(); window.__hall(id); } catch (err) { permError(err); } });
+  f.querySelector("#hfCodeSw").onclick = async () => {
+    const on = !S.exams[id].hallLock;
+    try { await updateDoc(doc(db, "exams", id), { hallLock: on }); S.exams[id].hallLock = on; renderExams(); stop(); window.__hall(id); toast("ok", on ? "✓ تم تفعيل رمز القاعة" : "✓ تم إلغاء رمز القاعة", on ? "اعرض الرقم على شاشة القاعة طول ما الطلاب بيدخلوا." : "الدخول دلوقتي بالموقع فقط."); }
+    catch (err) { permError(err); }
+  };
   f.querySelector("#hfHere").onclick = () => {
     const msg = f.querySelector("#hfMsg"); msg.textContent = "جارٍ تحديد موقعك بدقة… (استنى ثواني)";
     navigator.geolocation.getCurrentPosition(async p => {
@@ -692,6 +718,16 @@ window.__hall = async id => {
       try { await updateDoc(doc(db, "exams", id), { geoLock: true, geo }); Object.assign(S.exams[id], { geoLock: true, geo }); msg.innerHTML = `✓ تم — الاختبار مقفول على <b>${esc(geo.place || "مكانك الحالي")}</b> بنصف قطر ${r} متر. دقة تحديد موقعك ≈ ${acc} متر${acc > 40 ? " — <b>الدقة ضعيفة: اقترب من شباك وأعد المحاولة</b>" : ""}.`; renderExams(); }
       catch (err) { permError(err); }
     }, () => { msg.textContent = "تعذّر تحديد موقعك — اسمح للمتصفح بالوصول للموقع وشغّل الـ GPS / الواي فاي."; }, { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 });
+  };
+  f.querySelector("#hfTest").onclick = () => {
+    const msg = f.querySelector("#hfMsg"), ex = S.exams[id];
+    if (!ex.geoLock) { msg.textContent = "حدد موقع القاعة الأول."; return; }
+    msg.textContent = "جارٍ القياس…";
+    navigator.geolocation.getCurrentPosition(p => {
+      const fence = { ...SETTINGS.geoFence, ...(ex.geo || {}) };
+      const g = geoCheck({ lat: p.coords.latitude, lng: p.coords.longitude, accuracy: Math.round(p.coords.accuracy) }, fence, fence.maxAccuracy || 500);
+      msg.innerHTML = g.ok ? `✅ <b>مسموح</b> — بتبعد ${g.d} متر عن نقطة القاعة (دقة القياس ≈ ${Math.round(p.coords.accuracy)} متر). الطالب اللي واقف هنا هيقدر يدخل.` : `⛔ <b>غير مسموح</b> — بتبعد ${g.d ?? "؟"} متر (دقة القياس ≈ ${Math.round(p.coords.accuracy)} متر). الطالب اللي واقف هنا مش هيقدر يدخل.`;
+    }, () => { msg.textContent = "تعذّر تحديد موقعك."; }, { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 });
   };
   if (!e.hallLock) return;
   let code = "", prev = "", t0 = 0;
@@ -708,6 +744,85 @@ window.__hall = async id => {
     f.querySelector("#hfSub").textContent = `الرمز بيتغير بعد ${left} ثانية — سيب الشاشة دي مفتوحة طول ما الطلاب بيدخلوا`;
   }, 500);
 };
+// ===================== حالة التسليم: مين سلّم (ودرجته) ومين لسه بيحل ومين ما دخلش
+let subModalId = null, subRoster = {};
+window.__subStatus = async id => {
+  subModalId = id;
+  $("modalCard").innerHTML = `<div class="mh"><h3 style="font-family:var(--display);color:var(--ink)">📊 حالة التسليم</h3><button class="btn ghost sm" id="mClose">✕</button></div><div class="mb"><div class="spinner"></div></div>`;
+  $("modal").classList.remove("hidden"); $("mClose").onclick = () => { subModalId = null; closeModal(); };
+  const e = S.exams[id];
+  subRoster[id] = e.rosterId ? await getRoster(e.rosterId) : [];
+  renderSubmitStatus();
+};
+function subGroups(id) {
+  const e = S.exams[id], g = new Set(Object.values(S.attempts).filter(a => a.examId === id).map(a => String(a.group)));
+  (subRoster[id] || []).forEach(s => g.add(String(s.group)));
+  return [...g].filter(Boolean).sort((x, y) => x.localeCompare(y, "ar", { numeric: true }));
+}
+function submitData(id, grp) {
+  const e = S.exams[id];
+  let A = Object.values(S.attempts).filter(a => a.examId === id);
+  if (grp) A = A.filter(a => String(a.group) === grp);
+  const done = A.filter(a => a.status === "submitted").sort(byName);
+  const run = A.filter(a => a.status === "in_progress" || a.status === "suspended").sort(byName);
+  const lock = A.filter(a => a.status === "locked").sort(byName);
+  let absent = [];
+  if (e.rosterId) {
+    const seats = new Set(A.map(a => String(a.seat || ""))), names = new Set(A.map(a => normalizeName(a.name)));
+    absent = (subRoster[id] || []).filter(s => (!grp || String(s.group) === grp) && !seats.has(String(s.seat)) && !names.has(normalizeName(s.name))).sort(byName);
+  }
+  return { e, A, done, run, lock, absent };
+}
+function renderSubmitStatus() {
+  const id = subModalId; if (!id || !S.exams[id] || $("modal").classList.contains("hidden")) { subModalId = null; return; }
+  const gs = $("subGrp"), grp = gs ? gs.value : "";
+  const { e, A, done, run, lock, absent } = submitData(id, grp);
+  const now = Date.now();
+  const left = a => { const end = (a.startedAtMs || now) + ((a.durationMin || e.duration) + (a.extraMin || 0)) * 60000; return Math.max(0, Math.round((end - now) / 60000)); };
+  const ans = a => Object.keys(a.answers || {}).length, tot = a => (a.qIds || []).length || e.qCount || 0;
+  const online = a => now - (a.lastSeenMs || 0) < 75000;
+  const sc = a => scoreOf(a);
+  const total = A.length + absent.length;
+  const pctDone = total ? Math.round(done.length / total * 100) : 0;
+  const list = (rows, cols, empty) => rows.length ? `<div class="tbl-wrap sub-tbl"><table class="tbl"><thead><tr>${cols.map(c => `<th>${c[0]}</th>`).join("")}</tr></thead><tbody>${rows.map((a, i) => `<tr>${cols.map(c => `<td${c[2] ? ` class="${c[2]}"` : ""}>${c[1](a, i)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>` : `<p class="sub-empty">${empty}</p>`;
+  const nameCell = a => `<b>${esc(a.name)}</b>${a.seat ? `<br><small>جلوس ${esc(a.seat)}</small>` : ""}`;
+  $("modalCard").innerHTML = `<div class="mh"><h3 style="font-family:var(--display);color:var(--ink)">📊 حالة التسليم — ${esc(e.course)} — ${esc(e.title)}</h3><button class="btn ghost sm" id="mClose">✕</button></div>
+  <div class="mb">
+    <div class="sub-top"><select class="input" id="subGrp"><option value="">كل المجموعات</option>${subGroups(id).map(g => `<option value="${esc(g)}" ${g === grp ? "selected" : ""}>مجموعة ${esc(g)}</option>`).join("")}</select>
+      <button class="btn ghost sm" id="subXls">⬇️ Excel</button></div>
+    <div class="sub-kpis">
+      <div class="sk ok"><b>${done.length}</b><span>✅ سلّموا</span></div>
+      <div class="sk run"><b>${run.length}</b><span>✍️ لسه بيحلوا</span></div>
+      ${lock.length ? `<div class="sk bad"><b>${lock.length}</b><span>⛔ اتقفل عليهم</span></div>` : ""}
+      ${e.rosterId ? `<div class="sk gray"><b>${absent.length}</b><span>🚷 ما دخلوش</span></div>` : ""}
+      <div class="sk all"><b>${total}</b><span>الإجمالي</span></div>
+    </div>
+    <div class="sub-bar"><i style="width:${pctDone}%"></i><span>سلّم ${done.length} من ${total} طالب (${pctDone}%)</span></div>
+    <details class="sub-sec" open><summary>✍️ لسه ما سلّموش (${run.length + lock.length + absent.length})</summary>
+      ${list(run, [["م", (a, i) => i + 1], ["الطالب", nameCell, "name"], ["المجموعة", a => esc(a.group)], ["أجاب عن", a => `${ans(a)} / ${tot(a)}`], ["الوقت المتبقي", a => `${left(a)} د`], ["الحالة", a => a.status === "suspended" ? `<span class="badge b-w1">⏸ متوقف</span>` : online(a) ? `<span class="badge b-run">● بيحل الآن</span>` : `<span class="badge b-w0">○ غير متصل</span>`], ["", a => `<button class="btn ghost sm" data-act="detail" data-arg="${esc(a.id)}">ملفه</button>`]], "كل اللي دخلوا سلّموا 👏")}
+      ${lock.length ? `<h4 class="sub-h">⛔ اتقفل عليهم الاختبار (${lock.length})</h4>` + list(lock, [["م", (a, i) => i + 1], ["الطالب", nameCell, "name"], ["المجموعة", a => esc(a.group)], ["السبب", a => esc(a.lockedReason || "")], ["", a => `<button class="btn ghost sm" data-act="detail" data-arg="${esc(a.id)}">ملفه</button>`]], "") : ""}
+      ${e.rosterId ? `<h4 class="sub-h">🚷 ما دخلوش الاختبار (${absent.length})</h4>` + list(absent, [["م", (s, i) => i + 1], ["الطالب", s => `<b>${esc(s.name)}</b>`, "name"], ["رقم الجلوس", s => esc(s.seat || "")], ["المجموعة", s => esc(s.group)]], "كل طلاب الكشف دخلوا ✓") : ""}
+    </details>
+    <details class="sub-sec" open><summary>✅ سلّموا الاختبار بنجاح (${done.length})</summary>
+      ${list(done, [["م", (a, i) => i + 1], ["الطالب", nameCell, "name"], ["المجموعة", a => esc(a.group)], ["الدرجة", a => { const s = sc(a); return s ? `<b>${s.s}</b> / ${s.t}` : "—"; }], ["النسبة", a => { const s = sc(a); return s ? `<b style="color:${pctColor(s.pct)}">${s.pct}%</b>` : "—"; }], ["التقدير", a => { const s = sc(a), g = s ? gradeOf(s.pct, passOf(a), s.failed) : null; return g ? `<b style="color:${g.color}">${g.label}</b>` : "—"; }], ["وقت التسليم", a => `<small>${fmtTime(a.submittedAtMs)}${a.autoSubmitted ? " ⏱" : ""}</small>`], ["الخروقات", a => a.violationCount ? `<span class="badge b-w2">🚨 ${a.violationCount}</span>` : "—"], ["", a => `<button class="btn ghost sm" data-act="detail" data-arg="${esc(a.id)}">ورقته</button>`]], "لسه محدش سلّم")}
+    </details>
+    <p style="font-size:.78rem;color:var(--muted);margin-top:.6rem">الشاشة بتتحدث تلقائيًا. ⏱ = اتسلّم تلقائيًا بانتهاء الوقت.</p>
+  </div>`;
+  $("mClose").onclick = () => { subModalId = null; closeModal(); };
+  $("subGrp").onchange = renderSubmitStatus;
+  $("subXls").onclick = () => {
+    const d = submitData(id, $("subGrp").value);
+    const rows = [
+      ...d.done.map(a => { const s = sc(a) || {}; return { "الحالة": "سلّم", "اسم الطالب": a.name, "رقم الجلوس": a.seat || "", "المجموعة": a.group, "الدرجة": s.s ?? "", "من": s.t ?? "", "النسبة %": s.pct ?? "", "وقت التسليم": fmtDateTime(a.submittedAtMs), "الخروقات": a.violationCount || 0 }; }),
+      ...d.run.map(a => ({ "الحالة": "لسه بيحل", "اسم الطالب": a.name, "رقم الجلوس": a.seat || "", "المجموعة": a.group, "الدرجة": "", "من": "", "النسبة %": "", "وقت التسليم": "", "الخروقات": a.violationCount || 0 })),
+      ...d.lock.map(a => ({ "الحالة": "اتقفل عليه", "اسم الطالب": a.name, "رقم الجلوس": a.seat || "", "المجموعة": a.group, "الدرجة": 0, "من": "", "النسبة %": "", "وقت التسليم": fmtDateTime(a.submittedAtMs), "الخروقات": a.violationCount || 0 })),
+      ...d.absent.map(s => ({ "الحالة": "غائب", "اسم الطالب": s.name, "رقم الجلوس": s.seat || "", "المجموعة": s.group, "الدرجة": "", "من": "", "النسبة %": "", "وقت التسليم": "", "الخروقات": "" }))
+    ];
+    const wb = XLSX.utils.book_new(); wb.Workbook = { Views: [{ RTL: true }] };
+    XLSX.utils.book_append_sheet(wb, sheet(rows, [12, 30, 12, 10, 9, 7, 9, 22, 9]), "حالة التسليم");
+    XLSX.writeFile(wb, `حالة-التسليم-${safeName(`${e.course}-${e.title}`)}-${new Date().toISOString().slice(0, 10)}.xlsx`);
+  };
+}
 window.__toggle = async id => { try { await updateDoc(doc(db, "exams", id), { active: !S.exams[id].active }); } catch (e) { permError(e); } };
 window.__report = id => { $("repExam").value = id; document.querySelector('.side [data-tab="reports"]').click(); };
 window.__sheet = async id => {
@@ -764,7 +879,7 @@ window.__edit = id => {
       <label class="field"><span>🔒 المتصفح الآمن SEB</span><select class="input" id="eSeb">${sel(e.seb, "إلزامي على الأجهزة المدعومة", "غير مطلوب")}</select></label>
       <label class="field"><span>كشف الوجه</span><select class="input" id="eFace">${sel(e.faceAI, "مفعّل", "غير مفعّل")}</select></label>
       <label class="field"><span>📍 مكان أداء الاختبار</span><select class="input" id="eGeo">${sel(e.geoLock, "داخل الكلية فقط", "من أي مكان")}</select></label>
-      <label class="field"><span>🏫 رمز القاعة</span><select class="input" id="eHall">${sel(e.hallLock, "مطلوب", "غير مطلوب")}</select></label>
+      <label class="field"><span>🏫 رمز القاعة (اختياري)</span><select class="input" id="eHall">${sel(e.hallLock, "مطلوب", "غير مطلوب")}</select></label>
       <label class="field"><span>نطاق السماح (متر)</span><input class="input" id="eRadius" type="number" min="20" max="5000" value="${num((e.geo || SETTINGS.geoFence).radius, 300)}"></label>
       <label class="field"><span>خط العرض (Latitude)</span><input class="input" id="eLat" dir="ltr" value="${num((e.geo || SETTINGS.geoFence).lat)}"></label>
       <label class="field"><span>خط الطول (Longitude)</span><input class="input" id="eLng" dir="ltr" value="${num((e.geo || SETTINGS.geoFence).lng)}"></label>
@@ -790,7 +905,7 @@ window.__edit = id => {
         drawCount: Math.max(0, parseInt($("eDraw").value, 10) || 0), perQSec: 0, negative: +$("eNeg").value,
         noBack: false, mic: $("eCam").value === "1" && $("eMic").value === "1", seb: $("eSeb").value === "1", shuffle: $("eSh").value === "1", shuffleOptions: $("eShO").value === "1",
         camera: $("eCam").value === "1", faceAI: $("eCam").value === "1" && $("eFace").value === "1", rosterId: $("eRoster").value || "", active: $("eAct").value === "1",
-        geoLock: $("eGeo").value === "1", hallLock: $("eHall").value === "1",
+        geoLock: $("eGeo").value === "1", hallLock: $("eHall").value === "1", violPenalty: 0,
         geo: { ...SETTINGS.geoFence, ...(e.geo || {}), radius: Math.max(20, parseInt($("eRadius").value, 10) || 300), lat: Number($("eLat").value) || SETTINGS.geoFence.lat, lng: Number($("eLng").value) || SETTINGS.geoFence.lng }
       });
       closeModal(); toast("ok", "✓ تم الحفظ", e.title);
@@ -945,11 +1060,110 @@ function fillExamSelects() {
   const opts = E.map(e => `<option value="${e.id}">${esc(e.course)} — ${esc(e.title)}</option>`).join("");
   const r = $("rExam"), rv = r.value;
   r.innerHTML = `<option value="">كل الاختبارات</option>` + opts; r.value = S.exams[rv] ? rv : "";
+  const be = $("bExam"), bv = be.value;
+  be.innerHTML = `<option value="">كل الاختبارات</option>` + opts; be.value = S.exams[bv] ? bv : "";
   const p = $("repExam"), pv = p.value;
   p.innerHTML = E.length ? opts : `<option value="">لا توجد اختبارات</option>`; p.value = S.exams[pv] ? pv : (E[0]?.id || "");
   fillRosterSelect();
 }
 ["rExam", "rGroup", "rStatus"].forEach(id => $(id).onchange = renderResults);
+// ===================== الخروقات والإجراءات: المشرف يحدد الإجراء لكل طالب
+const DEC = {
+  none: { t: "لا إجراء (تمت المراجعة)", c: "b-ok", ic: "✓" },
+  notice: { t: "لفت نظر / تنبيه", c: "b-w1", ic: "⚠️" },
+  deduct: { t: "خصم درجات", c: "b-w2", ic: "➖" },
+  retake: { t: "إعادة الاختبار", c: "b-w1", ic: "↺" },
+  fail: { t: "اعتباره راسبًا (غش)", c: "b-w3", ic: "⛔" },
+  refer: { t: "إحالة للتحقيق (محضر غش)", c: "b-w3", ic: "🧾" }
+};
+function decBadge(a) {
+  const d = a.decision;
+  if (!d || !DEC[d.type]) return (a.violationCount || nflags(a)) ? `<span class="badge b-w0">⏳ لم يُحدد</span>` : `<span class="badge b-ok">لا توجد خروقات</span>`;
+  return `<span class="badge ${DEC[d.type].c}" title="${esc(d.note || "")}">${DEC[d.type].ic} ${DEC[d.type].t}${d.type === "deduct" ? ` (${num(d.deduct)} درجة)` : ""}</span>`;
+}
+const MAJ = f => /موبايل|شخص|سماعة|كاميرا|تبويب|تطبيق|الاختبار بعد|تصوير|كلام|النظر|ملء الشاشة|موقع/.test(f.type || "");
+function breachRows() {
+  const ex = $("bExam").value, fl = $("bFilter").value, q = $("bSearch").value.trim();
+  let R = myAttempts().filter(a => !ex || a.examId === ex);
+  if (fl !== "all") R = R.filter(a => (a.violationCount || 0) > 0 || nflags(a) > 0);
+  if (fl === "pending") R = R.filter(a => !a.decision);
+  if (fl === "done") R = R.filter(a => a.decision);
+  if (q) R = R.filter(a => (a.name || "").includes(q) || String(a.seat || "").includes(q));
+  return R.sort((x, y) => (y.violationCount || 0) - (x.violationCount || 0) || nflags(y) - nflags(x) || byName(x, y));
+}
+function updateBrCount() {
+  const n = myAttempts().filter(a => !a.decision && ((a.violationCount || 0) > 0)).length;
+  const c = $("brCnt"); if (c) { c.textContent = n; c.classList.toggle("hidden", !n); }
+}
+function renderBreaches() {
+  updateBrCount();
+  const R = breachRows();
+  $("bCount").textContent = `${R.length} طالب`;
+  $("bBody").innerHTML = R.length ? R.map(a => {
+    const V = (a.violations || []).map(v => ({ ...v, maj: 1 })), F = (a.flags || []).filter(MAJ);
+    const top = [...V, ...F].sort((x, y) => x.at - y.at).slice(-4).map(x => `<div class="br-it ${x.maj ? "maj" : ""}"><time>${fmtTime(x.at)}</time> ${esc(String(x.type).replace(/^🔎\s*/, ""))}</div>`).join("");
+    const sc = scoreOf(a);
+    return `<tr><td class="name">${esc(a.name)}${a.seat ? `<br><small style="color:var(--muted)">جلوس ${esc(a.seat)}</small>` : ""}<br><small style="color:var(--muted)">${esc(a.course)}</small></td><td>${esc(a.group)}</td>
+      <td>${a.violationCount ? `<span class="badge b-w3">🚨 ${num(a.violationCount)}</span>` : "—"}</td><td>${nflags(a) ? `<span class="badge b-w1">🔎 ${nflags(a)}</span>` : "—"}</td>
+      <td class="br-list">${top || "<small style='color:var(--muted)'>—</small>"}</td>
+      <td>${sc ? `<b>${sc.s}</b> / ${sc.t}${sc.ded ? `<br><small style="color:var(--danger)">قبل: ${sc.raw}</small>` : ""}` : "—"}</td>
+      <td>${decBadge(a)}${a.decision && a.decision.note ? `<br><small style="color:var(--muted)">${esc(a.decision.note).slice(0, 60)}</small>` : ""}</td>
+      <td><div class="row-acts"><button class="btn gold sm" data-act="decide" data-arg="${esc(a.id)}">⚖️ الإجراء</button><button class="btn ghost sm" data-act="detail" data-arg="${esc(a.id)}">📷 الأدلة</button></div></td></tr>`;
+  }).join("") : `<tr><td colspan="8"><div class="empty"><div class="e-ic">🛡️</div>${$("bFilter").value === "pending" ? "مفيش طلاب محتاجين قرار" : "لا توجد خروقات مسجلة"}</div></td></tr>`;
+}
+["bExam", "bFilter"].forEach(id => $(id).onchange = renderBreaches);
+$("bSearch").oninput = renderBreaches;
+window.__decide = id => {
+  const a = S.attempts[id]; if (!a) return;
+  const d = a.decision || {}, sc = scoreOf(a);
+  $("modalCard").innerHTML = `<div class="mh"><h3 style="font-family:var(--display);color:var(--ink)">⚖️ الإجراء مع: ${esc(a.name)}</h3><button class="btn ghost sm" id="mClose">✕</button></div>
+  <div class="mb">
+    <p style="color:var(--muted);margin-bottom:.6rem">${esc(a.course)} — ${esc(a.examTitle)} • مجموعة ${esc(a.group)} • <b style="color:var(--danger)">${num(a.violationCount)} خرق</b> • ${nflags(a)} ملاحظة سلوك${sc ? ` • الدرجة ${sc.raw} / ${sc.t}` : ""}</p>
+    <div class="dec-grid">${Object.entries(DEC).map(([k, v]) => `<label class="dec-opt"><input type="radio" name="decT" value="${k}" ${d.type === k ? "checked" : ""}><span>${v.ic} ${v.t}</span></label>`).join("")}</div>
+    <div class="grid2" style="margin-top:.8rem">
+      <label class="field" id="decDedBox"><span>عدد الدرجات المخصومة${sc ? ` (من ${sc.t})` : ""}</span><input class="input" id="decDed" type="number" min="0" step="0.5" value="${num(d.deduct || 0)}"></label>
+      <label class="field" style="grid-column:1/-1"><span>ملاحظات / سبب القرار (تظهر في محضر الغش)</span><textarea class="input" id="decNote" rows="3" placeholder="مثلًا: خرج من الاختبار مرتين لمدة 40 ثانية — ثبت استخدام الموبايل من الصور">${esc(d.note || "")}</textarea></label>
+    </div>
+    <p style="font-size:.8rem;color:var(--muted);margin:.4rem 0 .8rem">«اعتباره راسبًا» يجعل درجته صفر. «إعادة الاختبار» تُسجّل القرار فقط — لإعادة فتح الاختبار له استخدم «السماح له بإعادة الاختبار» من ملفه.</p>
+    <div class="toolbar"><button class="btn gold" id="decSave">💾 حفظ الإجراء</button>${a.decision ? `<button class="btn ghost" id="decClear">↺ إلغاء القرار</button>` : ""}<button class="btn ghost" data-act="detail" data-arg="${esc(a.id)}">📷 عرض الأدلة</button></div>
+  </div>`;
+  $("modal").classList.remove("hidden"); $("mClose").onclick = closeModal;
+  const syncDed = () => { const t = (document.querySelector("input[name=decT]:checked") || {}).value; $("decDedBox").classList.toggle("hidden", t !== "deduct"); };
+  document.querySelectorAll("input[name=decT]").forEach(r => r.onchange = syncDed); syncDed();
+  $("decSave").onclick = async () => {
+    const t = (document.querySelector("input[name=decT]:checked") || {}).value;
+    if (!t) return toast("danger", "اختار إجراء", "حدد الإجراء الأول.");
+    const ded = Math.max(0, +$("decDed").value || 0);
+    if (t === "deduct" && !ded) return toast("danger", "عدد الدرجات", "اكتب عدد الدرجات المخصومة.");
+    const decision = { type: t, deduct: t === "deduct" ? ded : 0, note: $("decNote").value.trim().slice(0, 500), by: S.me.name || S.me.email, at: Date.now() };
+    try { await updateDoc(doc(db, "attempts", id), { decision }); a.decision = decision; closeModal(); toast("ok", "✓ تم حفظ الإجراء", `${a.name}: ${DEC[t].t}`); renderAll(); }
+    catch (err) { permError(err); }
+  };
+  if ($("decClear")) $("decClear").onclick = async () => {
+    try { await updateDoc(doc(db, "attempts", id), { decision: null }); a.decision = null; closeModal(); toast("ok", "↺ تم إلغاء القرار", a.name); renderAll(); } catch (err) { permError(err); }
+  };
+};
+$("btnBrPrint").onclick = () => {
+  const ex = S.exams[$("bExam").value];
+  const R = myAttempts().filter(a => (!ex || a.examId === ex.id) && (a.violationCount || 0) > 0).sort(byName);
+  if (!R.length) return toast("ok", "🛡️ مفيش طلاب عليهم خروقات", ex ? `${ex.course} — ${ex.title}` : "كل الاختبارات");
+  printCheatersList({ exam: ex, rows: R.map(a => ({ a, sc: scoreOf(a), dec: a.decision ? (DEC[a.decision.type] || {}).t + (a.decision.type === "deduct" ? ` (${a.decision.deduct} درجة)` : "") : "لم يُحدد" })), owner: S.me.name });
+};
+$("btnBrExport").onclick = () => {
+  const R = breachRows().sort(byName);
+  if (!R.length) return toast("danger", "⚠️ لا توجد بيانات", "مفيش خروقات للتصدير.");
+  const rows = R.map((a, i) => { const sc = scoreOf(a) || {}; const d = a.decision || {}; return {
+    "م": i + 1, "اسم الطالب": a.name, "رقم الجلوس": a.seat || "", "المجموعة": a.group, "المقرر": a.course, "الاختبار": a.examTitle,
+    "عدد الخروقات": a.violationCount || 0, "ملاحظات السلوك": nflags(a),
+    "تفاصيل الخروقات": (a.violations || []).map(v => `${fmtTime(v.at)}: ${v.type}`).join(" | "),
+    "ملاحظات مسجلة": (a.flags || []).filter(MAJ).map(f => `${fmtTime(f.at)}: ${String(f.type).replace(/^🔎\s*/, "")}`).join(" | "),
+    "الدرجة قبل القرار": sc.raw ?? "", "الدرجة بعد القرار": sc.s ?? "", "الدرجة العظمى": sc.t ?? "",
+    "الإجراء": d.type ? DEC[d.type].t : "لم يُحدد", "الدرجات المخصومة": d.deduct || 0, "ملاحظات المشرف": d.note || "", "تاريخ القرار": d.at ? fmtDateTime(d.at) : "" }; });
+  const wb = XLSX.utils.book_new(); wb.Workbook = { Views: [{ RTL: true }] };
+  XLSX.utils.book_append_sheet(wb, sheet(rows, [5, 28, 11, 10, 20, 20, 10, 10, 60, 60, 12, 12, 10, 22, 12, 40, 18]), "الخروقات والإجراءات");
+  const ex = S.exams[$("bExam").value];
+  XLSX.writeFile(wb, `الخروقات-${safeName(ex ? `${ex.course}-${ex.title}` : "كل-الاختبارات")}-${new Date().toISOString().slice(0, 10)}.xlsx`);
+};
 $("rSearch").oninput = renderResults;
 function updatePending() {
   const n = myAttempts().filter(a => isFinished(a) && (scoreOf(a)?.pending || 0) > 0).length;
@@ -1010,7 +1224,7 @@ function renderResults() {
     const sc = scoreOf(a), gr = sc ? gradeOf(sc.pct, passOf(a), sc.failed) : null;
     return `<tr data-id="${esc(a.id)}" class="${rSel.has(a.id) ? "sel" : ""}">
       <td class="sel-col"><input type="checkbox" class="rChk" data-id="${esc(a.id)}" ${rSel.has(a.id) ? "checked" : ""} aria-label="تحديد"></td><td style="color:var(--faint)">${i + 1}</td><td class="name">${esc(a.name)}${a.seat ? `<br><small style="color:var(--muted);font-weight:500">جلوس ${esc(a.seat)}</small>` : ""}</td><td>${esc(a.group)}</td><td>${esc(a.course)}</td>
-      <td>${sc ? `<span class="score">${sc.s} <small>/ ${sc.t}</small></span>${sc.pending ? `<br><small style="color:var(--info)">✍️ ${sc.pending} للتصحيح</small>` : ""}` : "—"}</td>
+      <td>${sc ? `<span class="score">${sc.s} <small>/ ${sc.t}</small></span>${sc.ded ? `<br><small style="color:var(--danger)" title="قبل الخصم ${sc.raw}">➖ ${sc.ded} (قرار المشرف)</small>` : ""}${a.decision ? `<br><small>${decBadge(a)}</small>` : ""}${sc.pending ? `<br><small style="color:var(--info)">✍️ ${sc.pending} للتصحيح</small>` : ""}` : "—"}</td>
       <td>${sc ? `<div style="display:flex;align-items:center;gap:.5rem"><div class="bar" style="flex:1"><i style="width:${sc.pct}%;background:${pctColor(sc.pct)}"></i></div><small style="font-weight:700">${sc.pct}%</small></div>` : "—"}</td>
       <td>${gr ? `<b style="color:${gr.color};font-size:.85rem">${gr.label}</b>` : "—"}</td>
       <td>${statusBadge(a)}</td><td>${warnBadge(a.violationCount)}</td>

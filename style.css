@@ -1058,3 +1058,66 @@ body.app .pl-body{max-height:calc(100dvh - 330px)}
 .hall-box .hall-in{font-family:"Cairo",monospace;font-size:1.6rem;font-weight:800;letter-spacing:.35em;text-align:center}
 .hall-box small{color:var(--muted);font-weight:500}
 .hf-code{white-space:nowrap;font-size:min(9.5vw,22vh,10rem);letter-spacing:.05em}@media (max-width:860px){.hf-code{font-size:min(17vw,18vh)}}
+.hf-main.loc-only{grid-template-columns:minmax(280px,480px);justify-content:center}
+.hf-main.loc-only .hf-side{padding:1.4rem}
+.hall-full:has(.loc-only){background:rgba(13,27,61,.92)}
+.feed-item.flag .fi{background:#fef3c7}
+.hf-toggle{display:flex;align-items:center;gap:.7rem;padding:.65rem .8rem;border:1px solid var(--line);border-radius:14px;background:#f8fafc;cursor:pointer}
+.hf-toggle .switch{background:#cbd5e1}.hf-toggle .switch.on{background:var(--ok)}
+.hf-toggle b{display:block;color:var(--ink)}.hf-toggle small{color:var(--muted);font-size:.8rem}
+
+/* ملخص الخروقات في نهاية الاختبار */
+.vs{margin:1rem auto 0;max-width:620px;text-align:right;border-radius:14px;padding:.8rem 1rem;line-height:1.8;font-size:.92rem}
+.vs.ok{background:#ecfdf5;border:1px solid #a7f3d0;color:#065f46}
+.vs.bad{background:#fff1f2;border:1px solid #fecdd3;color:#7f1d1d}
+.vs ol{margin:.3rem 0;padding-inline-start:1.3rem}.vs li span{font-weight:700;color:#9f1239;margin-inline-end:.4rem;direction:ltr;display:inline-block}
+.vs p{margin:.3rem 0 0}
+
+/* ===== الخروقات والإجراءات ===== */
+.br-list{font-size:.8rem;line-height:1.5}
+.br-it{padding:.1rem 0;color:var(--muted)}.br-it.maj{color:#9f1239;font-weight:600}
+.br-it time{font-weight:700;margin-inline-end:.3rem;direction:ltr;display:inline-block}
+.dec-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:.5rem}
+.dec-opt{display:flex;align-items:center;gap:.5rem;border:1.5px solid var(--line);border-radius:12px;padding:.6rem .75rem;cursor:pointer;font-weight:700;color:var(--ink)}
+.dec-opt:has(input:checked){border-color:var(--gold,#e8a530);background:#fffbeb}
+.dec-opt input{accent-color:var(--gold,#e8a530);width:17px;height:17px}
+.b-w3{background:var(--danger);color:#fff}
+.stu-warn{z-index:165}.stu-warn.warn{background:linear-gradient(135deg,#b45309,#f59e0b)}
+
+/* ===== حالة التسليم ===== */
+.sub-row{align-items:center}.sub-row .btn{margin-inline-start:auto}
+.sub-top{display:flex;gap:.6rem;align-items:center;justify-content:space-between;margin-bottom:.8rem;flex-wrap:wrap}
+.sub-top select{max-width:220px}
+.sub-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:.5rem}
+.sk{border-radius:14px;padding:.7rem;text-align:center;border:1px solid var(--line);background:#fff}
+.sk b{display:block;font-family:var(--display);font-size:1.8rem;line-height:1.1;color:var(--ink)}.sk span{font-size:.82rem;color:var(--muted);font-weight:700}
+.sk.ok{background:#ecfdf5;border-color:#a7f3d0}.sk.ok b{color:#047857}
+.sk.run{background:#eff6ff;border-color:#bfdbfe}.sk.run b{color:#1d4ed8}
+.sk.bad{background:#fff1f2;border-color:#fecdd3}.sk.bad b{color:#be123c}
+.sk.gray b{color:#64748b}
+.sub-bar{position:relative;height:22px;border-radius:999px;background:var(--surface-2);overflow:hidden;margin:.8rem 0}
+.sub-bar i{position:absolute;inset:0 0 0 auto;background:linear-gradient(90deg,#10b981,#059669);border-radius:999px}
+.sub-bar span{position:relative;display:block;text-align:center;font-size:.78rem;font-weight:800;line-height:22px;color:var(--ink)}
+.sub-sec{border:1px solid var(--line);border-radius:14px;margin-top:.7rem;overflow:hidden}
+.sub-sec summary{cursor:pointer;font-weight:800;padding:.7rem .9rem;background:var(--surface-2);color:var(--ink)}
+.sub-sec .tbl-wrap{max-height:320px;overflow:auto}
+.sub-h{margin:.7rem .9rem .3rem;color:var(--ink);font-size:.92rem}
+.sub-empty{padding:.7rem .9rem;color:var(--muted);margin:0}
+.sub-tbl td small{color:var(--muted)}
+
+/* ===== قائمة الإنذارات على شاشة الطالب ===== */
+.warn-badge{cursor:pointer;border:0;font:inherit}
+.wl-box{margin:.2rem 0 .8rem;border:1px solid #fecdd3;background:#fff1f2;border-radius:14px;padding:.6rem .7rem;text-align:right}
+.wl-box h4{margin:0 0 .35rem;font-size:.9rem;color:#9f1239;display:flex;justify-content:space-between;align-items:center}
+.wl-box h4 span{background:#be123c;color:#fff;border-radius:999px;padding:0 .5em;font-size:.75rem}
+.wl-box ol,.wl-pop ol{list-style:none;margin:0;padding:0;max-height:160px;overflow:auto;display:flex;flex-direction:column;gap:.25rem}
+.wl-box li,.wl-pop li{display:flex;gap:.4rem;font-size:.78rem;line-height:1.45;padding:.25rem .35rem;border-radius:8px;background:#fff}
+.wl-box li.maj,.wl-pop li.maj{color:#9f1239;font-weight:700}
+.wl-box li.min,.wl-pop li.min{color:#92400e}
+.wl-box time,.wl-pop time{flex:none;font-weight:800;direction:ltr;color:#64748b}
+.wl-box small,.wl-pop small{display:block;margin-top:.35rem;color:#9f1239;font-size:.72rem;line-height:1.5}
+.wl-pop{position:fixed;top:64px;left:12px;z-index:170;width:min(360px,calc(100vw - 24px));background:#fff;border:1px solid #fecdd3;border-radius:16px;box-shadow:0 20px 50px -15px rgba(15,23,42,.45);padding:.7rem}
+.wl-pop-h{display:flex;justify-content:space-between;align-items:center;margin-bottom:.4rem;color:#9f1239}
+.wl-pop-h button{border:0;background:#fff1f2;color:#9f1239;width:28px;height:28px;border-radius:50%;cursor:pointer}
+.wl-pop ol{max-height:50vh}
+@media (max-width:860px){.wl-box{display:none}}

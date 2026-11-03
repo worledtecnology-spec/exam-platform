@@ -36,8 +36,8 @@ export function statusText(a) {
 export function warnBadge(n) { n = num(n); return `<span class="badge b-w${Math.min(n, 2)}">${n ? "⚠️ " + n : "—"}</span>`; }
 
 export function toast(kind, title, body, ms = 4500) {
-  const ic = { danger: "🚨", lock: "⛔", ok: "✅", info: "🟢", warn: "⏳" }[kind] || "ℹ️";
-  const t = document.createElement("div"); t.className = "toast " + (kind === "warn" ? "danger" : kind);
+  const ic = { danger: "🚨", lock: "⛔", ok: "✅", info: "🟢", warn: "⏳", flag: "🔎" }[kind] || "ℹ️";
+  const t = document.createElement("div"); t.className = "toast " + (kind === "warn" ? "danger" : kind === "flag" ? "info" : kind);
   t.innerHTML = `<div class="ti">${ic}</div><div><b>${esc(String(title).replace(/^[^؀-ۿA-Za-z0-9]+\s/, ""))}</b><small>${esc(body).replace(/\n/g, "<br>")}</small></div><button class="x">✕</button>`;
   t.querySelector(".x").onclick = () => t.remove();
   $("toasts").prepend(t);
@@ -68,7 +68,7 @@ window.__zoom = el => {
   lb.innerHTML = `<div><img src="${esc(safeImg(el.querySelector("img").getAttribute("src")))}"><p>${esc(el.dataset.cap)}</p></div>`;
   lb.onclick = () => lb.remove(); document.body.appendChild(lb);
 };
-const LVL = { warn: "إنذار", restart: "إغلاق ومسح الإجابات", fail: "غلق نهائي ورسوب" };
+const LVL = { record: "خرق مسجّل", warn: "إنذار", restart: "إغلاق ومسح الإجابات", fail: "غلق نهائي ورسوب" };
 export function timelineHtml(a) {
   const ev = [{ at: a.startedAtMs, t: "بدأ الاختبار", c: "s" },
   ...(a.violations || []).map(v => ({ at: v.at, t: `🚨 ${v.type}${v.level ? ` ← ${LVL[v.level] || ""}` : ""}`, c: "v" })),
@@ -84,16 +84,17 @@ export function resultRow(a, i) {
   const g = sc.pct === "" ? null : gradeOf(sc.pct, passOf(a), sc.failed);
   return {
     "م": i + 1, "رقم الجلوس": a.seat || "", "اسم الطالب": a.name, "رقم المجموعة": a.group, "المقرر": a.course, "الاختبار": a.examTitle,
-    "الدرجة": sc.s, "الدرجة العظمى": sc.t, "النسبة %": sc.pct, "التقدير": g ? g.label : "",
+    "الدرجة": sc.s, "خصم (قرار المشرف)": sc.ded || 0, "الدرجة العظمى": sc.t, "النسبة %": sc.pct, "التقدير": g ? g.label : "",
     "عدد الأسئلة المُجاب عنها": Object.keys(a.answers || {}).length,
     "الحالة": statusText(a), "عدد محاولات الغش": a.violationCount || 0, "مرات إعادة الاختبار": a.restarts || 0, "مخالفات ثانوية": nflags(a),
     "تفاصيل محاولات الغش": (a.violations || []).map(v => `${fmtTime(v.at)}: ${v.type}`).join(" | "),
+    "إجراء المشرف": a.decision ? ({ none: "لا إجراء", notice: "لفت نظر", deduct: `خصم ${a.decision.deduct} درجة`, retake: "إعادة الاختبار", fail: "راسب (غش)", refer: "إحالة للتحقيق" })[a.decision.type] || "" : "",
     "نوع الجهاز": a.device ? deviceText(a.device) : "", "المتصفح الآمن SEB": a.seb ? "نعم" : "لا",
     "الموقع": a.location ? (a.location.address || `${a.location.lat}, ${a.location.lng}`) : (a.locationError || "غير متاح"),
     "رابط الخريطة": mapLink(a), "وقت البدء": fmtDateTime(a.startedAtMs), "وقت التسليم": fmtDateTime(a.submittedAtMs)
   };
 }
-export const RES_W = [5, 11, 28, 10, 20, 20, 8, 10, 9, 14, 12, 22, 10, 10, 10, 50, 40, 12, 40, 36, 18, 18];
+export const RES_W = [5, 11, 28, 10, 20, 20, 8, 10, 10, 9, 14, 12, 22, 10, 10, 10, 50, 22, 40, 12, 40, 36, 18, 18];
 export function sheet(rows, widths) {
   const ws = XLSX.utils.json_to_sheet(rows.length ? rows : [{ "—": "لا توجد بيانات" }]);
   if (widths) ws["!cols"] = widths.map(w => ({ wch: w }));

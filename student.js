@@ -3,7 +3,7 @@ import { getFirestore, collection, query, where, getDocs, doc, getDoc, setDoc, u
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { firebaseConfig, SETTINGS } from "./config.js";
-import { isConfigured, normalizeName, hashStr, seededShuffle, esc, mmss, fmtDateTime, LETTERS, frameGuard, initAppCheck, brandHtml, wireLogos, geoCheck } from "./common.js";
+import { isConfigured, normalizeName, hashStr, seededShuffle, esc, mmss, fmtDateTime, LETTERS, frameGuard, initAppCheck, brandHtml, wireLogos, geoCheck, geoDecide } from "./common.js";
 import { pickQuestions, isAnswered } from "./scoring.js";
 import { TYPE_LABEL } from "./parser.js";
 import { loadFaceDetector, detectFaces, faceReady, loadObjectDetector, detectObjects, objectsReady } from "./face.js";
@@ -126,33 +126,52 @@ async function lookupSeat() {
 const toLatin = s => String(s).replace(/[٠-٩]/g, d => "٠١٢٣٤٥٦٧٨٩".indexOf(d)).replace(/\s/g, "");
 
 // ---------------------------------------------------------------- location
-function getLocation() {
+// ---- تحديد الموقع بطريقة متدرجة: دقة عالية ← دقة عادية ← متابعة مستمرة لتحسين الدقة
+let locWatch = null, locAt = 0;
+function setLocFrom(p) {
+  const acc = Math.round(p.coords.accuracy);
+  if (loc && Date.now() - locAt < 60000 && acc > (loc.accuracy || 9e9) + 20) return; // نحتفظ بالأدق
+  loc = { lat: +p.coords.latitude.toFixed(6), lng: +p.coords.longitude.toFixed(6), accuracy: acc, address: (loc && loc.address) || "" };
+  locAt = Date.now(); locErr = null;
+}
+function locHelp() {
+  const k = deviceKind();
+  return k === "ios" ? "الإعدادات ← الخصوصية والأمان ← خدمات الموقع ← شغّلها ← Safari (أو Chrome) ← «أثناء الاستخدام» وفعّل «الموقع الدقيق»، ثم ارجع واضغط «إعادة المحاولة»."
+    : k === "android" ? "شغّل «الموقع» من شريط الإعدادات السريعة، واضغط علامة 🔒 بجوار رابط الموقع ← الأذونات ← الموقع ← «السماح»، ولو لسه: إعدادات الموبايل ← التطبيقات ← Chrome ← الأذونات ← الموقع ← «السماح»."
+      : "اضغط علامة 🔒 بجوار رابط الموقع ← الموقع ← «السماح»، وشغّل الواي فاي (اللابتوب بيحدد مكانه منه).";
+}
+function getPos(high, timeout, maxAge) {
+  return new Promise((res, rej) => navigator.geolocation.getCurrentPosition(res, rej, { enableHighAccuracy: high, timeout, maximumAge: maxAge }));
+}
+async function locateNow() {
+  if (!navigator.geolocation) { locErr = "المتصفح لا يدعم تحديد الموقع"; return null; }
+  try { setLocFrom(await getPos(true, 12000, 30000)); }
+  catch (e1) {
+    if (e1 && e1.code === 1) { locErr = "تم رفض إذن الوصول إلى الموقع"; return null; }
+    try { setLocFrom(await getPos(false, 12000, 120000)); } catch (e2) { locErr = e2 && e2.code === 1 ? "تم رفض إذن الوصول إلى الموقع" : "تعذّر تحديد الموقع"; }
+  }
+  if (!locWatch && navigator.geolocation.watchPosition) {
+    try { locWatch = navigator.geolocation.watchPosition(setLocFrom, () => { }, { enableHighAccuracy: true, maximumAge: 15000, timeout: 30000 }); } catch { /* */ }
+  }
+  return loc;
+}
+async function getLocation() {
   setLoc("wait", "جارٍ تحديد موقعك تلقائيًا…", "اسمح للمتصفح بالوصول إلى الموقع عند ظهور الطلب");
-  if (!navigator.geolocation) { locErr = "المتصفح لا يدعم تحديد الموقع"; setLoc("bad", locErr, ""); return; }
-  navigator.geolocation.getCurrentPosition(async p => {
-    loc = { lat: +p.coords.latitude.toFixed(6), lng: +p.coords.longitude.toFixed(6), accuracy: Math.round(p.coords.accuracy), address: "" };
-    locErr = null;
+  await locateNow();
+  if (loc) {
     setLoc("ok", "تم تحديد موقعك ✓", `دقة التحديد ≈ ${loc.accuracy} متر`);
     try {
       const r = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${loc.lat}&lon=${loc.lng}&zoom=16&accept-language=ar`);
       const j = await r.json();
       if (j && j.display_name) { loc.address = j.display_name.slice(0, 250); setLoc("ok", "تم تحديد موقعك ✓", loc.address); }
     } catch { }
-  }, err => {
-    loc = null;
-    locErr = err.code === 1 ? "تم رفض إذن الوصول إلى الموقع" : "تعذّر تحديد الموقع";
-    setLoc("bad", locErr, err.code === 1 ? "افتح إعدادات الموقع في المتصفح واسمح بالوصول ثم اضغط «إعادة المحاولة»" : "تأكد من تشغيل خدمة الموقع (GPS) ثم اضغط «إعادة المحاولة»", true);
-  }, { enableHighAccuracy: true, timeout: 20000, maximumAge: 60000 });
+  } else setLoc(SETTINGS.geoStrict ? "bad" : "wait", locErr || "تعذّر تحديد الموقع", (SETTINGS.geoStrict ? "" : "تقدر تكمل عادي — ") + locHelp(), true);
 }
-// تحديث الموقع بدقة عالية (يُستخدم للتحقق من التواجد داخل الكلية)
-function refreshLoc() {
-  return new Promise(res => {
-    if (!navigator.geolocation) return res(loc);
-    navigator.geolocation.getCurrentPosition(p => {
-      loc = { ...(loc || {}), lat: +p.coords.latitude.toFixed(6), lng: +p.coords.longitude.toFixed(6), accuracy: Math.round(p.coords.accuracy), address: (loc && loc.address) || "" };
-      locErr = null; res(loc);
-    }, () => res(loc), { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 });
-  });
+// تحديث الموقع قبل الدخول (يستخدم آخر قراءة حديثة لو موجودة)
+async function refreshLoc() {
+  if (loc && Date.now() - locAt < 45000) return loc;
+  await locateNow();
+  return loc;
 }
 const fenceOf = e => e && e.geoLock ? { ...SETTINGS.geoFence, ...(e.geo || {}) } : null;
 function geoMsg(g, f) {
@@ -187,7 +206,7 @@ $("btnNext").onclick = async () => {
     if (!group) return loginError("من فضلك اختر رقم المجموعة.");
     me = { name, group, seat: "" };
   }
-  if (SETTINGS.requireLocation && !loc && !e.geoLock) return loginError("يجب السماح بتحديد الموقع لدخول الاختبار.");
+  if (SETTINGS.requireLocation && SETTINGS.geoStrict && !loc && !e.geoLock) return loginError("يجب السماح بتحديد الموقع لدخول الاختبار.");
   // فتح الاختبار لمجموعات محددة: نقرأ حالة الاختبار الحالية من القاعدة (قد يكون المشرف فتح/أغلق مجموعة الآن)
   try { const fr = await getDoc(doc(db, "exams", exId)); if (fr.exists()) Object.assign(e, fr.data()); } catch { /* نكمل بآخر نسخة */ }
   if (!e.active) return loginError("هذا الاختبار مغلق الآن.");
@@ -214,9 +233,9 @@ $("btnNext").onclick = async () => {
   if (fence) {
     btn.textContent = "جارٍ التحقق من موقعك…";
     await refreshLoc();
-    const g = geoCheck(loc, fence, fence.maxAccuracy || 500);
-    if (loc) setLoc(g.ok ? "ok" : "bad", g.ok ? `أنت داخل ${fence.name || "مكان الاختبار"} ✓` : "خارج مكان الاختبار", g.ok ? `دقة التحديد ≈ ${loc.accuracy} متر` : `يبعد حوالي ${g.d} متر`, !g.ok);
-    if (!g.ok) { btn.disabled = false; btn.textContent = "متابعة ←"; return loginError(geoMsg(g, fence)); }
+    const g = geoDecide(loc, fence, !!SETTINGS.geoStrict);
+    if (loc) setLoc(g.ok ? "ok" : "bad", g.ok ? (g.verified ? `أنت داخل ${fence.name || "مكان الاختبار"} ✓` : "تم — تقدر تكمل") : "خارج مكان الاختبار", g.ok ? `دقة التحديد ≈ ${loc.accuracy} متر` : `يبعد حوالي ${g.d} متر`, !g.ok);
+    if (!g.ok && (SETTINGS.geoBlockFar || !SETTINGS.smooth)) { btn.disabled = false; btn.textContent = "متابعة ←"; return loginError(geoMsg(g, fence)); }
   }
   try {
     // الأسئلة محمية: لا تُقرأ إلا أثناء موعد الاختبار
@@ -256,34 +275,19 @@ let pledge = null;
 function showPledge() {
   const C = pledgeClauses(exam, PEN);
   $("plBody").innerHTML = `<p class="pl-intro">أنا الطالب/ة <b>${esc(me.name)}</b> — المجموعة <b>${esc(me.group)}</b>${me.seat ? ` — رقم الجلوس <b>${esc(me.seat)}</b>` : ""}، في اختبار <b>${esc(exam.course)} — ${esc(exam.title)}</b>، أتعهد بالآتي:</p>
-    <ol class="pl-list">${C.map(c => `<li><span class="pl-n">${c.ic}</span><div><b>${esc(c.t)}</b><p>${c.d}</p></div></li>`).join("")}</ol>
-    <p class="pl-end" id="plEnd">— نهاية الميثاق —</p>`;
-  ["plAgree", "plName", "plOk"].forEach(x => $(x).disabled = true);
-  $("plAgree").checked = false; $("plName").value = ""; $("plErr").classList.add("hidden");
-  $("plSub").textContent = "اقرأ البنود كلها بعناية — لازم توصل لآخرها عشان تقدر توقّع";
-  show("scrPledge");
-  const body = $("plBody"), t0 = Date.now(), minMs = Math.min(25000, 2500 * C.length);
-  const unlock = () => {
-    const atEnd = body.scrollTop + body.clientHeight >= body.scrollHeight - 12;
-    const left = Math.ceil((minMs - (Date.now() - t0)) / 1000);
-    if (!atEnd) return;
-    if (left > 0) { $("plSub").textContent = `خد وقتك في القراءة… التوقيع يتفتح بعد ${left} ثانية`; return; }
-    $("plSub").textContent = "✓ قرأت الميثاق — وافق ووقّع باسمك";
-    $("plAgree").disabled = false; clearInterval(pledgeT); body.onscroll = null;
-  };
-  body.onscroll = unlock; clearInterval(pledgeT); pledgeT = setInterval(unlock, 500); body.scrollTop = 0;
+    <ol class="pl-list">${C.map(c => `<li><span class="pl-n">${c.ic}</span><div><b>${esc(c.t)}</b><p>${c.d}</p></div></li>`).join("")}</ol>`;
+  $("plAgree").checked = false; $("plOk").disabled = true; $("plErr").classList.add("hidden");
+  show("scrPledge"); $("plBody").scrollTop = 0;
 }
-let pledgeT = 0;
-$("plAgree").onchange = () => { $("plName").disabled = !$("plAgree").checked; $("plOk").disabled = !$("plAgree").checked; if ($("plAgree").checked) $("plName").focus(); };
+$("plAgree").onchange = () => { $("plOk").disabled = !$("plAgree").checked; };
 $("plOk").onclick = async () => {
-  const typed = $("plName").value.trim().replace(/\s+/g, " ");
-  if (normalizeName(typed) !== normalizeName(me.name)) { $("plErr").textContent = `اكتب اسمك كما هو مسجل بالضبط: «${me.name}»`; $("plErr").classList.remove("hidden"); return; }
-  pledge = { v: PLEDGE_VER, at: Date.now(), name: typed, clauses: pledgeClauses(exam, PEN).length };
+  if (!$("plAgree").checked) return;
+  pledge = { v: PLEDGE_VER, at: Date.now(), name: me.name, clauses: pledgeClauses(exam, PEN).length };
   $("agree").checked = true;
   show("scrRules");
   await runChecks();
 };
-$("plBack").onclick = () => { clearInterval(pledgeT); show("scrLogin"); };
+$("plBack").onclick = () => show("scrLogin");
 $("btnBack").onclick = () => { stopCamera(); clearInterval(faceInt); show("scrLogin"); };
 
 function renderRules() {
@@ -296,12 +300,17 @@ function renderRules() {
   if (exam.seb) R.push(inSEB() ? ["🔒", "أنت داخل المتصفح الآمن — الجهاز مقفول على الاختبار لحد ما تسلّم", ""] : ["🛡️", "جهازك مش بيدعم المتصفح الآمن، فالاختبار هيشتغل بالمراقبة المشددة (ملء الشاشة + الكاميرا + الميكروفون)", ""]);
   R.push(["↔️", "تقدر تتنقل بين الأسئلة وترجع لأي سؤال وتعدّل إجابتك في أي وقت قبل «تسليم الاختبار»", ""]);
   if (exam.negative > 0) R.push(["➖", "توجد درجة سالبة للإجابة الخاطئة — اترك السؤال إن لم تكن متأكدًا", ""]);
-  if (exam.camera) R.push(["📷", "الكاميرا" + (micOn() ? " والميكروفون" : "") + " لازم يفضلوا شغالين طول الاختبار — لو اتقفلوا يتوقف الاختبار ويُسجَّل غش", "red"]);
-  if (micOn()) R.push(["🎙️", "الكلام مع أي حد أثناء الاختبار بيترصد بالميكروفون ويتسجّل كدليل — تكراره = محاولة غش", "red"]);
-  if (exam.camera && exam.faceAI) R.push(["📵", "ظهور موبايل أو شخص تاني أمام الكاميرا = غش • تكرار النظر بعيدًا 3 مرات = غش", "red"]);
-  if (exam.camera) R.push(["🎧", "ممنوع السماعات (بلوتوث أو سلك) والكاميرات الافتراضية، وممنوع تصوير الشاشة أو فتح المنصة في تبويب تاني", "red"]);
-  R.push(["🚫", "الخروج من صفحة الاختبار أو فتح أي تطبيق أو شاشة أخرى" + (exam.camera ? " أو الابتعاد عن الكاميرا" : "") + " = محاولة غش", "red"]);
-  R.push(["⚖️", PEN.map((p, i) => `<b>${i + 1}</b> ${({ warn: "إنذار", restart: "مسح الإجابات والبدء من جديد", fail: "غلق نهائي ورسوب" })[p]}`).join(" ← "), "red"]);
+  if (exam.camera) R.push(["📷", "الكاميرا" + (micOn() ? " والميكروفون" : "") + " لازم يفضلوا شغالين طول الاختبار", ""]);
+  if (SETTINGS.silentMode) {
+    R.push(["🚫", SETTINGS.leaveFails ? "<b>فتح أي تطبيق أو تبويب أو برنامج تاني أو الخروج من صفحة الاختبار = غلق الاختبار فورًا والرسوب</b>" : "<b>فتح أي تطبيق أو تبويب تاني أو الخروج من صفحة الاختبار = خرق بيتسجل عليك بالأدلة</b>، والمشرف هو اللي بيحدد الإجراء — والخروقات هتظهر لك في آخر الاختبار", "red"]);
+    if (exam.camera) R.push(["🔎", "سلوكك طول الاختبار بيتسجل بالصور" + (micOn() ? " والصوت" : "") + " والتوقيت ويراجعه المشرف (الكلام، ظهور موبايل أو شخص تاني، السماعات…)", ""]);
+  } else {
+    if (micOn()) R.push(["🎙️", "الكلام مع أي حد أثناء الاختبار بيترصد بالميكروفون ويتسجّل كدليل — تكراره = محاولة غش", "red"]);
+    if (exam.camera && exam.faceAI) R.push(["📵", "ظهور موبايل أو شخص تاني أمام الكاميرا = غش • تكرار النظر بعيدًا 3 مرات = غش", "red"]);
+    if (exam.camera) R.push(["🎧", "ممنوع السماعات (بلوتوث أو سلك) والكاميرات الافتراضية، وممنوع تصوير الشاشة أو فتح المنصة في تبويب تاني", "red"]);
+    R.push(["🚫", "الخروج من صفحة الاختبار أو فتح أي تطبيق أو شاشة أخرى" + (exam.camera ? " أو الابتعاد عن الكاميرا" : "") + " = محاولة غش", "red"]);
+    R.push(["⚖️", PEN.map((p, i) => `<b>${i + 1}</b> ${({ warn: "إنذار", restart: "مسح الإجابات والبدء من جديد", fail: "غلق نهائي ورسوب" })[p]}`).join(" ← "), "red"]);
+  }
   $("rulesList").innerHTML = R.map(([ic, t, c]) => `<div class="rule ${c}"><div class="ic">${ic}</div><div>${t}</div></div>`).join("");
 }
 
@@ -310,7 +319,7 @@ let checks = {};
 function renderChecks() {
   const rows = [
     ["id", "بيانات الطالب", me.seat ? "تم التحقق من رقم الجلوس" : "تم التحقق من الاسم والمجموعة"],
-    exam.geoLock ? ["geo", "داخل الكلية", checks.geo && checks.geo.ok ? `على بعد ${checks.geo.d} م من المركز` : checks.geo ? "خارج مكان الاختبار" : "…"] : ["loc", "تحديد الموقع", loc ? "تم تحديد موقعك" : "غير متاح"],
+    exam.geoLock ? ["geo", "مكان الاختبار", checks.geo && checks.geo.ok ? (checks.geo.verified ? `داخل النطاق — على بعد ${checks.geo.d} م` : "تعذّر التأكد من موقعك بدقة — مسموح بالدخول") : checks.geo ? "خارج مكان الاختبار" : "…"] : ["loc", "تحديد الموقع", loc ? "تم تحديد موقعك" : SETTINGS.geoStrict ? "غير متاح" : "غير متاح — مسموح بالدخول"],
     exam.camera ? ["cam", "الكاميرا", camOk ? "تعمل بشكل سليم" : checks.cam === "wait" ? "جارٍ التشغيل…" : "مطلوبة — اسمح بالوصول للكاميرا"] : null,
     micOn() ? ["mic", "الميكروفون", micOk ? "يعمل بشكل سليم" : checks.cam === "wait" ? "جارٍ التشغيل…" : "مطلوب — اسمح بالوصول للميكروفون"] : null,
     exam.camera ? ["dev", "سماعات وكاميرا افتراضية", checks.devMsg || "…"] : null,
@@ -319,20 +328,21 @@ function renderChecks() {
     ["net", "الاتصال بالإنترنت", navigator.onLine ? "متصل" : "غير متصل"]
   ].filter(Boolean);
   $("checks").innerHTML = rows.map(([k, t, d]) => {
-    const st = k === "id" ? true : k === "geo" ? !!(checks.geo && checks.geo.ok) : k === "loc" ? (!!loc || !SETTINGS.requireLocation) : k === "cam" ? (checks.cam === "wait" ? "wait" : camOk) : k === "mic" ? (checks.cam === "wait" ? "wait" : micOk) : k === "dev" ? checks.dev !== false : k === "face" ? checks.face : k === "net" ? navigator.onLine : checks.screen;
+    const st = k === "id" ? true : k === "geo" ? !!(checks.geo && checks.geo.ok) : k === "loc" ? (!!loc || !SETTINGS.requireLocation || !SETTINGS.geoStrict) : k === "cam" ? (checks.cam === "wait" ? "wait" : camOk) : k === "mic" ? (checks.cam === "wait" ? "wait" : micOk) : k === "dev" ? checks.dev !== false : k === "face" ? checks.face : k === "net" ? navigator.onLine : checks.screen;
     return `<div class="chk ${st === "wait" ? "wait" : st ? "ok" : "bad"}"><i>${st === "wait" ? "…" : st ? "✓" : "✕"}</i><div><b>${t}</b><small>${esc(d)}</small></div></div>`;
   }).join("");
   updateStartBtn();
 }
 function allChecksOk() {
-  return (!exam.geoLock || (checks.geo && checks.geo.ok)) && (!exam.camera || camOk) && (!micOn() || micOk) && (!exam.camera || checks.dev !== false) && (!(exam.camera && exam.faceAI) || checks.face === true) && checks.screen && navigator.onLine && (!SETTINGS.requireLocation || loc);
+  if (SETTINGS.smooth) return navigator.onLine && (!exam.geoLock || !checks.geo || checks.geo.ok || !SETTINGS.geoBlockFar);
+  return (!exam.geoLock || (checks.geo && checks.geo.ok)) && (!exam.camera || camOk) && (!micOn() || micOk) && (!exam.camera || checks.dev !== false) && checks.screen && navigator.onLine && (!SETTINGS.requireLocation || !SETTINGS.geoStrict || loc);
 }
 function updateStartBtn() { $("btnStart").disabled = !($("agree").checked && allChecksOk()); }
 $("agree").onchange = updateStartBtn;
 
 async function runChecks() {
   checks = { screen: !(SETTINGS.blockMultiScreen && window.screen && window.screen.isExtended === true) };
-  if (exam.geoLock) { const f = fenceOf(exam); checks.geo = geoCheck(loc, f, f.maxAccuracy || 500); }
+  if (exam.geoLock) { const f = fenceOf(exam); checks.geo = geoDecide(loc, f, !!SETTINGS.geoStrict); }
   $("camSetup").classList.toggle("hidden", !exam.camera);
   renderChecks();
   if (exam.camera) { checks.cam = "wait"; renderChecks(); await startCamera(); }
@@ -441,6 +451,12 @@ function camLost(type) {
   if (voice) { voice.stop(); voice = null; }
   if (!camLostShown) { camLostShown = true; violation(type, true); }
   if (!running) return;
+  if (SETTINGS.smooth) { // لا نوقف الطالب — نحاول إعادة التشغيل بهدوء كل 15 ثانية
+    clearTimeout(camLost.t);
+    const again = () => { if (!running || (camOk && (!micOn() || micOk))) return; startCamera().then(ok => { if (ok && running) camRestored(); else camLost.t = setTimeout(again, 15000); }); };
+    camLost.t = setTimeout(again, 15000);
+    return;
+  }
   $("warnOverlay").classList.add("hidden");
   $("cbWhy").textContent = type;
   $("camBlock").classList.remove("hidden");
@@ -476,8 +492,9 @@ async function onTalk() {
   const clip = clipP ? await Promise.race([clipP, new Promise(r => setTimeout(() => r(null), 7000))]) : null;
   clipP = null;
   if (!running) return;
-  flag(`رصد صوت كلام بجوار الطالب (المرة ${talkCount})`);
-  saveEvidence("talk", `صوت كلام — المرة ${talkCount}`, clip);
+  flag(`🔎 رصد صوت كلام بجوار الطالب (المرة ${talkCount})`);
+  saveEvidence("talk", `صوت كلام — المرة ${talkCount}`, clip).then(img => { if (talkCount === 1 || talkCount % per === 0) tg(`🎙️ رصد كلام (المرة ${talkCount})\n${who()}`, img); });
+  if (SETTINGS.silentMode) return studentWarn("ممنوع الكلام أثناء الاختبار", `تم رصد صوت كلام وتسجيله (المرة ${talkCount})`, "warn", "🎙️");
   if (talkCount % per === 0) violation(`التحدث أثناء الاختبار (تكرر رصد الكلام ${talkCount} مرات)`);
   else toast(`🎙️ تم رصد صوت كلام — ممنوع التحدث أثناء الاختبار (${talkCount % per} من ${per})`, 4500);
 }
@@ -540,8 +557,8 @@ const who = () => `👤 ${me.name}\n👥 مجموعة ${me.group}${me.seat ? ` �
 // ---------------------------------------------------------------- start / resume
 $("btnStart").onclick = async () => {
   if (exam.geoLock) {
-    const f = fenceOf(exam); await refreshLoc(); checks.geo = geoCheck(loc, f, f.maxAccuracy || 500); renderChecks();
-    if (!checks.geo.ok) { $("startErr").textContent = geoMsg(checks.geo, f); $("startErr").classList.remove("hidden"); return; }
+    const f = fenceOf(exam); await refreshLoc(); checks.geo = geoDecide(loc, f, !!SETTINGS.geoStrict); renderChecks();
+    if (!checks.geo.ok && (SETTINGS.geoBlockFar || !SETTINGS.smooth)) { $("startErr").textContent = geoMsg(checks.geo, f); $("startErr").classList.remove("hidden"); return; }
     $("startErr").classList.add("hidden");
   }
   if (!allChecksOk()) return;
@@ -553,7 +570,7 @@ $("btnStart").onclick = async () => {
     await setDoc(attemptRef, {
       examId: exam.id, examTitle: exam.title, course: exam.course, owner: exam.owner || "",
       name: me.name, nameKey: normalizeName(me.name), group: me.group, seat: me.seat || "", rosterId: exam.rosterId || "",
-      uid: deviceId, deviceId, pledge: pledge || null, device: devInfo || null, seb: inSEB(), mic: !!micOk, geoLock: !!exam.geoLock, geoDist: checks.geo ? checks.geo.d : null, location: loc, locationError: locErr, camera: !!camOk, faceAI: !!(exam.faceAI && faceOn),
+      uid: deviceId, deviceId, pledge: pledge || null, device: devInfo || null, seb: inSEB(), mic: !!micOk, geoLock: !!exam.geoLock, geoDist: checks.geo && checks.geo.d != null ? checks.geo.d : null, geoVerified: !!(checks.geo && checks.geo.verified), location: loc, locationError: locErr, camera: !!camOk, faceAI: !!(exam.faceAI && faceOn),
       status: "in_progress", startedAt: serverTimestamp(), startedAtMs: now, durationMin: exam.duration,
       qIds, answers: {}, qPos: 0, restarts: 0, violations: [], violationCount: 0, flags: [], flagCount: 0, qCount: qIds.length,
       screen: `${screen.width}×${screen.height}`, touch: isTouch, lastSeenMs: now,
@@ -646,7 +663,7 @@ function clearLocal() { try { localStorage.removeItem(LKEY()); } catch { } }
 
 // ---------------------------------------------------------------- exam
 function beginExam(a) {
-  answers = { ...(a.answers || {}) }; violations = a.violationCount || 0; restarts = a.restarts || 0;
+  answers = { ...(a.answers || {}) }; violations = a.violationCount || 0; restarts = a.restarts || 0; myViol = (a.violations || []).slice(); warnItems = myViol.map(v => ({ kind: "maj", text: v.type, at: v.at }));
   extraMin = a.extraMin || 0; startMs = a.startedAtMs;
   order = (a.qIds && a.qIds.length ? a.qIds : pickQuestions(exam, attemptId)).filter(id => qById[id]);
   optOrder = {};
@@ -674,6 +691,10 @@ function beginExam(a) {
   startTimers();
   listenAttempt();
   camLostShown = false; $("camBlock").classList.add("hidden");
+  if (SETTINGS.smooth && exam.camera && checks.dev === false) setTimeout(() => violation(`بدأ الاختبار مع ${checks.devMsg || "سماعة / كاميرا افتراضية"}`, true), 3000);
+  if (SETTINGS.smooth && checks.screen === false) setTimeout(() => violation("بدأ الاختبار مع شاشة إضافية متصلة", true), 3200);
+  if (exam.geoLock && checks.geo && checks.geo.verified && !checks.geo.ok) setTimeout(() => violation(`خارج مكان الاختبار — يبعد حوالي ${checks.geo.d} متر عن ${fenceOf(exam).name || "القاعة"}`, true), 2700);
+  else if (exam.geoLock && checks.geo && !checks.geo.verified) setTimeout(() => record(checks.geo.reason === "noloc" ? `دخل بدون تحديد موقع (${locErr || "غير متاح"})` : `تعذّر التأكد من وجوده داخل ${fenceOf(exam).name || "مكان الاختبار"} (دقة الموقع ≈ ${loc ? loc.accuracy : "؟"} م، يبعد ≈ ${checks.geo.d ?? "؟"} م)`), 2500);
   if (exam.camera && (!camOk || (micOn() && !micOk))) setTimeout(() => camLost(!camOk ? "الكاميرا غير مفعّلة أثناء الاختبار" : "الميكروفون غير مفعّل أثناء الاختبار"), 2500);
   else startVoiceMonitor();
 }
@@ -856,7 +877,7 @@ function tick() {
 function stopExam(keepCamera) {
   running = false;
   [timerInt, hbInt, snapInt, guardInt, faceInt].forEach(clearInterval); clearTimeout(saveTimer);
-  hideTimeAlert(); alertsFired = null;
+  hideTimeAlert(); hideStudentWarn(); alertsFired = null;
   if (voice) { voice.stop(); voice = null; } $("camBlock").classList.add("hidden");
   ["warnOverlay", "confirmOverlay", "msgOverlay"].forEach(x => $(x).classList.add("hidden"));
   exitFullscreen();
@@ -871,7 +892,7 @@ async function finalize(auto, byAdmin) {
   const n = order.filter(id => isAnswered(qById[id], answers[id])).length;
   $("doneTitle").textContent = byAdmin ? "أنهى المراقب اختبارك" : "تم تسليم الاختبار بنجاح";
   $("doneMsg").innerHTML = `${byAdmin ? "تم إنهاء الاختبار بواسطة المراقب وحفظ إجاباتك." : auto ? "انتهى الوقت وتم تسليم إجاباتك تلقائيًا." : "تم استلام إجاباتك."}<br>
-    أجبت عن <b>${n}</b> من <b>${order.length}</b> سؤال. تم حفظ إجاباتك وإرسالها لأستاذ المقرر.`;
+    أجبت عن <b>${n}</b> من <b>${order.length}</b> سؤال. تم حفظ إجاباتك وإرسالها لأستاذ المقرر.${violSummary()}`;
   show("scrDone");
   if (inSEB()) { const q = $("sebQuit"); q.href = new URL("seb-quit.html", location.href).href; q.classList.remove("hidden"); }
   const ss = $("saveState"); ss.textContent = navigator.onLine ? "جارٍ حفظ إجاباتك…" : "⏳ في انتظار عودة الإنترنت لإرسال إجاباتك — لا تغلق الصفحة";
@@ -913,18 +934,84 @@ function listenAttempt() {
 $("btnMsgOk").onclick = () => $("msgOverlay").classList.add("hidden");
 
 // ---------------------------------------------------------------- anti-cheat: سلّم العقوبات
+// ---- قائمة الإنذارات على الشاشة (بتتحدث مع كل إنذار — بدون إيقاف الاختبار)
+let warnItems = [];
+function addWarnItem(kind, text) {
+  if (!SETTINGS.studentWarnings) return;
+  warnItems.push({ kind, text, at: Date.now() });
+  renderWarnList();
+}
+function renderWarnList() {
+  const html = warnItems.slice().reverse().slice(0, 30).map(w => `<li class="${w.kind}"><time>${new Date(w.at).toLocaleTimeString("ar-EG", { hour: "2-digit", minute: "2-digit" })}</time><span>${w.kind === "maj" ? "🚨" : "👀"} ${esc(w.text)}</span></li>`).join("");
+  const majors = warnItems.filter(w => w.kind === "maj").length;
+  $("wlList").innerHTML = html; $("wlPopList").innerHTML = html || "<li>لا توجد إنذارات</li>";
+  $("wlCount").textContent = warnItems.length;
+  $("wlBox").classList.toggle("hidden", !warnItems.length);
+  const b = $("warnBadge");
+  b.classList.toggle("hidden", !warnItems.length);
+  b.textContent = `⚠️ إنذارات: ${majors}${warnItems.length > majors ? ` • ملاحظات: ${warnItems.length - majors}` : ""}`;
+}
+$("warnBadge").onclick = () => { renderWarnList(); $("warnPop").classList.toggle("hidden"); };
+$("wlPopClose").onclick = () => $("warnPop").classList.add("hidden");
 function updateWarnBadge() {
+  if (SETTINGS.silentMode && SETTINGS.studentWarnings) return renderWarnList();
   const b = $("warnBadge");
   b.classList.toggle("hidden", violations === 0);
-  b.textContent = `⚠️ إنذار ${violations} من ${PEN.length}`;
+  b.textContent = SETTINGS.silentMode ? `⚠️ إنذارات: ${violations}` : `⚠️ إنذار ${violations} من ${PEN.length}`;
 }
-async function violation(type, force) {
+// ---- إنذار على الشاشة بدون إيقاف الاختبار (شريط يظهر أعلى الشاشة ويختفي لوحده)
+let vwT = 0, vwLast = {}, vwPending = null;
+function studentWarn(title, sub, lvl = "low", ic = "⚠️", replay) {
+  if (!SETTINGS.studentWarnings || !running) return;
+  if (!replay) addWarnItem(lvl === "low" ? "maj" : "min", title.replace(/^إنذار رقم \d+:\s*/, "").replace(/^تنبيه:\s*/, ""));
+  if (document.hidden) { vwPending = [title, sub, lvl, ic]; return; } // يظهر أول ما يرجع للاختبار
+  const k = title.replace(/\d+/g, ""); if (vwLast[k] && Date.now() - vwLast[k] < 8000) return; vwLast[k] = Date.now();
+  const el = $("vWarn");
+  $("vwIc").textContent = ic; $("vwTitle").textContent = title; $("vwSub").textContent = sub || "";
+  el.classList.remove("hidden", "warn", "low"); el.classList.add(lvl); void el.offsetWidth; el.classList.add("show");
+  if (lvl === "low") { alertBeep(1); try { navigator.vibrate && navigator.vibrate(250); } catch { } }
+  if (voice) voice.pause(2500);
+  clearTimeout(vwT); vwT = setTimeout(hideStudentWarn, 7000);
+}
+function hideStudentWarn() { const el = $("vWarn"); el.classList.remove("show"); el.classList.add("hidden"); }
+$("vwClose").onclick = hideStudentWarn;
+document.addEventListener("visibilitychange", () => { if (!document.hidden && vwPending) { const p = vwPending; vwPending = null; setTimeout(() => studentWarn(p[0], p[1], p[2], p[3], true), 400); } });
+// تسجيل صامت: لا يظهر للطالب أي شيء — يُسجَّل للمشرف بالصورة والتوقيت
+const lastRec = {};
+function record(type) {
   if (!running) return;
+  const now = Date.now(), key = type.replace(/\(.*?\)|\d+/g, "").trim();
+  if (lastRec[key] && now - lastRec[key] < 6000) return;
+  lastRec[key] = now;
+  flag("🔎 " + type);
+  studentWarn("تنبيه: " + type.replace(/\s*\(.*?\)\s*$/, ""), "اتسجّل للمشرف — التزم بميثاق الاختبار", "warn", "👀");
+  if (exam && exam.camera) saveEvidence("flag", type).then(img => { if (!lastRec["tg:" + key] || now - lastRec["tg:" + key] > 60000) { lastRec["tg:" + key] = now; tg(`🔎 سلوك مسجّل\n${who()}\n${type}`, img); } });
+}
+// الخروقات الكبيرة: تُسجَّل وتُخصم من الدرجة — بدون إخراج الطالب ولا تنبيهه أثناء الاختبار
+const MAJOR = /خارج مكان الاختبار|بدأ الاختبار مع|موبايل|شخص آخر|أكثر من شخص|إيقاف الكاميرا|إيقاف الميكروفون|الكاميرا غير مفعّلة|الميكروفون غير مفعّل|سماعة|كاميرا افتراضية|تصوير الشاشة|تبويب أو نافذة أخرى|صورة الكاميرا ثابتة|عدم ظهور الطالب|شاشة إضافية/;
+let myViol = [], lastMajor = {}, leaveStart = 0;
+function recordMajor(type, leave) {
+  if (!running) return;
+  const now = Date.now(), key = leave ? "leave" : type.replace(/\(.*?\)|\d+/g, "").trim();
+  if (lastMajor[key] && now - lastMajor[key] < (leave ? 4000 : 10000)) return;
+  lastMajor[key] = now;
+  violations++;
+  const v = { type, at: now, level: "record" };
+  myViol.push(v);
+  updateWarnBadge();
+  studentWarn(`إنذار رقم ${violations}: ${type}`, "تم تسجيل خرق عليك بالأدلة — التزم بميثاق الاختبار. المشرف هيحدد الإجراء.", "low", "🚨");
+  updateDoc(attemptRef, { violations: arrayUnion(v), violationCount: violations, lastViolationAt: serverTimestamp(), lastSeenMs: now }).catch(console.error);
+  const shot = exam.camera && !document.hidden ? saveEvidence("violation", type) : Promise.resolve(null);
+  shot.then(img => tg(`🚨 خرق مسجّل (${violations})\n${who()}\n${type}`, img));
+}
+async function violation(type, force, leave) {
+  if (!running) return;
+  if (SETTINGS.silentMode && !(leave && SETTINGS.leaveFails)) return leave || MAJOR.test(type) ? recordMajor(type, leave) : record(type);
   const now = Date.now();
   if (!force && now - lastViol < 2500) return;
   lastViol = now; faceGrace = now + 10000; if (voice) voice.pause(9000);
   violations++;
-  const level = PEN[Math.min(violations, PEN.length) - 1];
+  const level = leave && SETTINGS.leaveFails ? "fail" : PEN[Math.min(violations, PEN.length) - 1];
   const v = { type, at: now, level };
   const upd = { violations: arrayUnion(v), violationCount: violations, lastViolationAt: serverTimestamp(), lastSeenMs: now };
   const shot = exam.camera ? saveEvidence("violation", type) : Promise.resolve(null);
@@ -977,8 +1064,18 @@ $("btnRestart").onclick = async () => {
   toast("بدأت الإجابة من جديد — بالتوفيق");
 };
 
+// ملخص الخروقات للطالب في نهاية الاختبار
+function violSummary() {
+  const V = myViol.slice().sort((x, y) => x.at - y.at);
+  if (!V.length) return `<div class="vs ok">✅ <b>لم يُسجَّل عليك أي خرق</b> — شكرًا لالتزامك بميثاق الاختبار.</div>`;
+  return `<div class="vs bad"><b>⚠️ تم تسجيل ${V.length === 1 ? "خرق واحد" : V.length === 2 ? "خرقين" : V.length + (V.length <= 10 ? " خروقات" : " خرقًا")} عليك أثناء الاختبار:</b>
+    <ol>${V.slice(0, 12).map(v => `<li><span>${new Date(v.at).toLocaleTimeString("ar-EG", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</span> ${esc(v.type)}</li>`).join("")}</ol>
+    <p>الخروقات دي مسجلة عليك بالأدلة (صور وتوقيتات)، و<b>المشرف هيراجعها ويحدد الإجراء</b> حسب ميثاق الاختبار اللي وافقت عليه.</p></div>`;
+}
 function failScreen(reason) {
-  $("failMsg").innerHTML = `تم غلق الاختبار نهائيًا بسبب تكرار محاولات الغش${reason ? `<br><small>آخر مخالفة: ${esc(reason)}</small>` : ""}.`;
+  $("failMsg").innerHTML = SETTINGS.silentMode
+    ? `تم غلق الاختبار نهائيًا لأنك <b>خرجت من صفحة الاختبار</b> (فتح تطبيق أو تبويب أو برنامج آخر) — وده مخالف لميثاق الاختبار اللي وقّعت عليه.${reason ? `<br><small>${esc(reason)}</small>` : ""}<br><small>لو ده حصل غصب عنك (مكالمة أو عطل)، كلّم المراقب فورًا.</small>`
+    : `تم غلق الاختبار نهائيًا بسبب تكرار محاولات الغش${reason ? `<br><small>آخر مخالفة: ${esc(reason)}</small>` : ""}.`;
   show("scrFail");
 }
 
@@ -1022,9 +1119,12 @@ function startFaceMonitor() {
         else if (away >= (SETTINGS.faceAwaySec || 4)) {
           away = 0; awayCount++;
           const per = SETTINGS.awayPerViolation || 3;
-          flagEv(`النظر بعيدًا عن الشاشة (المرة ${awayCount})`);
-          if (awayCount % per === 0) violation(`تكرار النظر بعيدًا عن الشاشة (${awayCount} مرات)`);
-          else toast(`👀 ركّز في شاشتك — تم رصد النظر بعيدًا (${awayCount % per} من ${per})`, 3500);
+          flagEv(`النظر بعيدًا عن الشاشة يمين/شمال (المرة ${awayCount})`);
+          if (SETTINGS.silentMode) studentWarn("ركّز في شاشتك", `تم رصد النظر بعيدًا عن الشاشة وتسجيله (المرة ${awayCount})`, "warn", "👀");
+          if (!SETTINGS.silentMode) {
+            if (awayCount % per === 0) violation(`تكرار النظر بعيدًا عن الشاشة (${awayCount} مرات)`);
+            else toast(`👀 ركّز في شاشتك — تم رصد النظر بعيدًا (${awayCount % per} من ${per})`, 3500);
+          }
         }
       }
     }
@@ -1073,8 +1173,16 @@ new MutationObserver(ms => {
     if (injSeen++ < 5) flagEv(`إضافة في المتصفح تتدخل في صفحة الاختبار (${(n.id || n.nodeName).toString().slice(0, 40)})`);
   }
 }).observe(document.documentElement, { childList: true, subtree: true });
-document.addEventListener("visibilitychange", () => { if (document.hidden) violation("مغادرة صفحة الاختبار (فتح تطبيق أو تبويب أو شاشة أخرى)"); });
-window.addEventListener("blur", () => setTimeout(() => { if (running && !document.hasFocus()) violation("الانتقال إلى نافذة أو برنامج آخر"); }, 400));
+document.addEventListener("visibilitychange", () => {
+  if (!running) return;
+  if (document.hidden) { leaveStart = leaveStart || Date.now(); violation("فتح تطبيق أو تبويب آخر / مغادرة صفحة الاختبار", true, true); }
+  else if (leaveStart) {
+    const sec = Math.round((Date.now() - leaveStart) / 1000); leaveStart = 0;
+    flag(`🔎 رجع لصفحة الاختبار بعد ${sec} ثانية خارجها`);
+    if (exam.camera) setTimeout(() => saveEvidence("flag", `لحظة العودة للاختبار بعد ${sec} ثانية`), 800);
+  }
+});
+window.addEventListener("blur", () => setTimeout(() => { if (running && !document.hasFocus()) violation("الانتقال إلى نافذة أو برنامج آخر", true, true); }, (SETTINGS.leaveGraceSec || 3) * 1000));
 document.addEventListener("fullscreenchange", () => {
   if (document.fullscreenElement) { fsEntered = true; setTimeout(() => { base = { w: innerWidth, h: innerHeight }; }, 600); return; }
   if (fsEntered && running && $("warnOverlay").classList.contains("hidden")) violation("الخروج من وضع ملء الشاشة");
@@ -1107,7 +1215,7 @@ function guardTick() {
   if (SETTINGS.blockMultiScreen && window.screen && window.screen.isExtended === true) violation("توصيل شاشة إضافية أثناء الاختبار");
   if (exam.camera && !camLostShown) {
     const t = camStream && camStream.getVideoTracks()[0], m = camStream && camStream.getAudioTracks()[0];
-    if (!t || t.readyState === "ended") camLost("إيقاف الكاميرا أثناء الاختبار");
+    if (!t || t.readyState === "ended") camLost(t ? "إيقاف الكاميرا أثناء الاختبار" : "الكاميرا غير مفعّلة أثناء الاختبار");
     else if (micOn() && (!m || m.readyState === "ended")) camLost("إيقاف الميكروفون أثناء الاختبار");
     else if (t.muted) flag("الكاميرا لا ترسل صورة (مكتومة)");
     else frozenCheck();

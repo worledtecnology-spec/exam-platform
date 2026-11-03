@@ -10,7 +10,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@600;700;800&family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=20261103b">
+<link rel="stylesheet" href="style.css?v=20261103i">
 </head>
 <body class="no-select app">
 
@@ -27,7 +27,7 @@
   <div class="wrap">
     <div class="who"><b id="barTitle">—</b><small id="barWho">—</small></div>
     <span class="rec"><i></i> مراقَب</span>
-    <span class="warn-badge hidden" id="warnBadge">⚠️ إنذار</span>
+    <button type="button" class="warn-badge hidden" id="warnBadge" aria-controls="warnPop" title="اضغط لعرض قائمة الإنذارات">⚠️ إنذار</button>
     <div class="timer" id="timer">--:--</div>
   </div>
   <div class="progress"><i id="progBar"></i></div>
@@ -81,12 +81,11 @@
 
   <!-- التحقق والتعليمات -->
   <section class="screen card hidden" id="scrPledge">
-    <div class="pl-head"><span class="pl-ic">📜</span><div><h2>ميثاق الاختبار</h2><small id="plSub">اقرأ البنود كلها بعناية — لازم توصل لآخرها عشان تقدر توقّع</small></div></div>
+    <div class="pl-head"><span class="pl-ic">📜</span><div><h2>ميثاق الاختبار</h2><small id="plSub">اقرأ البنود بعناية ثم وافق عليها</small></div></div>
     <div class="pl-body" id="plBody" tabindex="0"></div>
     <div class="pl-sign">
-      <label class="agree pl-agree"><input type="checkbox" id="plAgree" disabled> <span>قرأت ميثاق الاختبار وفهمته، وأوافق على كل بنوده، وأقر بأن أي مخالفة له تُعد محاولة غش يُحرَّر بها <b>محضر غش</b> وأنا مُقِر بها.</span></label>
+      <label class="agree pl-agree"><input type="checkbox" id="plAgree"> <span>قرأت ميثاق الاختبار وفهمته، وأوافق على كل بنوده، وأقر بأن أي مخالفة له تُعد محاولة غش يُحرَّر بها <b>محضر غش</b> وأنا مُقِر بها.</span></label>
       <div class="pl-row">
-        <label class="field"><span>✍️ اكتب اسمك بالكامل كتوقيع</span><input class="input" id="plName" autocomplete="off" disabled placeholder="نفس الاسم المسجل"></label>
         <button class="btn gold lg" id="plOk" disabled>أوافق وأوقّع ←</button>
         <button class="btn ghost" id="plBack" type="button">رجوع</button>
       </div>
@@ -224,6 +223,7 @@
     <div class="qnav" id="qNav"></div>
     <p class="nav-note hidden" id="navNote">🔒 لا يمكن الرجوع للأسئلة السابقة في هذا الاختبار</p>
     <p style="font-size:.88rem;color:var(--muted);margin-bottom:.8rem">أجبت عن <b id="ansCount">0</b> من <b id="ansTotal">0</b></p>
+    <div class="wl-box hidden" id="wlBox"><h4>⚠️ قائمة الإنذارات <span id="wlCount">0</span></h4><ol id="wlList"></ol><small>الإنذارات مسجلة بالأدلة — المشرف هيحدد الإجراء. الاختبار مش هيتقفل عليك.</small></div>
     <button class="btn gold block" id="btnSubmit">تسليم الاختبار</button>
   </aside>
 </div>
@@ -274,8 +274,10 @@
   </div>
 </div>
 <div class="s-toast hidden" id="sToast"></div>
+<div class="wl-pop hidden" id="warnPop" role="dialog" aria-label="قائمة الإنذارات"><div class="wl-pop-h"><b>⚠️ قائمة الإنذارات</b><button type="button" id="wlPopClose" aria-label="إغلاق">✕</button></div><ol id="wlPopList"></ol><small>الإنذارات مسجلة بالأدلة — المشرف هيحدد الإجراء. الاختبار مش هيتقفل عليك.</small></div>
+<div class="time-alert stu-warn hidden" id="vWarn" role="alert" aria-live="assertive"><span class="ta-ic" id="vwIc">⚠️</span><div class="ta-txt"><b id="vwTitle"></b><small id="vwSub"></small></div><button type="button" class="ta-x" id="vwClose" aria-label="إغلاق">✕</button></div>
 <div class="time-alert hidden" id="timeAlert" role="alert" aria-live="assertive"><span class="ta-ic">⏰</span><div class="ta-txt"><b id="taTitle"></b><small id="taSub"></small></div><button type="button" class="ta-x" id="taClose" aria-label="إغلاق">✕</button></div>
 
-<script type="module" src="student.js?v=20261103b"></script>
+<script type="module" src="student.js?v=20261103i"></script>
 </body>
 </html>

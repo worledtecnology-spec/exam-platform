@@ -67,7 +67,13 @@ export function scoreAttempt(a, exam, keyDoc) {
   });
   const failed = a.status === "locked";
   s = failed ? 0 : Math.max(0, Math.round(s * 100) / 100);
-  return { s, t, pct: t ? Math.round(s / t * 1000) / 10 : 0, pending, failed, per, n: qs.length };
+  // قرار المشرف بخصوص الخروقات (لا يوجد أي خصم تلقائي)
+  const raw = s, dec = a.decision || {};
+  let failedNow = failed;
+  if (!failed && dec.type === "deduct" && +dec.deduct > 0) s = Math.max(0, Math.round((s - +dec.deduct) * 100) / 100);
+  if (dec.type === "fail" || dec.type === "cancel") { s = 0; failedNow = true; }
+  const ded = Math.round((raw - s) * 100) / 100;
+  return { s, t, pct: t ? Math.round(s / t * 1000) / 10 : 0, pending, failed: failedNow, per, n: qs.length, raw, ded };
 }
 
 // نصوص العرض للمراجعة

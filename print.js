@@ -121,14 +121,14 @@ export function printCertificates({ exam, rows }) {
 }
 
 // ------------------------------------------------------------- محضر غش إلكتروني
-const LVL = { warn: "إنذار", restart: "غلق الاختبار ومسح الإجابات", fail: "غلق نهائي ورسوب" };
+const LVL = { record: "خرق مسجّل (خصم من الدرجة)", warn: "إنذار", restart: "غلق الاختبار ومسح الإجابات", fail: "غلق نهائي ورسوب" };
 export function printCheatReport({ exam, a, evidence = [], owner = "" }) {
   const C = pledgeClauses(exam, SETTINGS.penalties);
   const V = (a.violations || []).slice().sort((x, y) => x.at - y.at);
   const F = (a.flags || []).slice().sort((x, y) => x.at - y.at);
   const shots = evidence.filter(e => (e.kind === "violation" || e.kind === "talk" || e.kind === "flag") && safeImg(e.img)).slice(0, 24);
   const no = `${(exam.id || "EX").slice(0, 6).toUpperCase()}-${String(a.id || "").slice(-6).toUpperCase()}`;
-  const status = a.status === "locked" ? "غلق نهائي — راسب بسبب الغش" : a.restarts ? `أُعيد الاختبار ${a.restarts} مرة بسبب مخالفات` : V.length ? "إنذار" : "لا توجد محاولات غش مسجلة";
+  const status = a.status === "locked" ? "غلق نهائي — راسب بسبب الغش" : a.restarts ? `أُعيد الاختبار ${a.restarts} مرة بسبب مخالفات` : V.length ? `${V.length} خرق مسجّل` : "لا توجد خروقات مسجلة";
   const css = `@page{size:A4;margin:13mm 12mm}
   .head{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;border-bottom:3px double #8b1d2c;padding-bottom:10px;margin-bottom:12px}
   .head .r{font-weight:700;line-height:1.8;font-size:13px}.head .l{text-align:left;font-size:12px;line-height:1.9;color:#333}
@@ -164,6 +164,7 @@ export function printCheatReport({ exam, a, evidence = [], owner = "" }) {
     <tr><th>الجهاز المستخدم</th><td>${esc(a.device ? deviceText(a.device) : "—")}</td></tr>
     <tr><th>الموقع</th><td>${a.location ? `${esc(a.location.address || "")} (${a.location.lat}, ${a.location.lng})${a.geoDist != null ? ` — يبعد ${a.geoDist} م عن مركز الكلية` : ""}` : esc(a.locationError || "غير متاح")}</td></tr>
     <tr><th>الحالة النهائية</th><td class="${a.status === "locked" ? "bad" : ""}">${esc(status)}</td></tr>
+    <tr><th>إجراء المشرف</th><td>${a.decision ? `<b>${esc(({ none: "لا إجراء", notice: "لفت نظر / تنبيه", deduct: `خصم ${a.decision.deduct} درجة`, retake: "إعادة الاختبار", fail: "اعتباره راسبًا (غش)", refer: "إحالة للتحقيق (محضر غش)" })[a.decision.type] || "")}</b>${a.decision.note ? ` — ${esc(a.decision.note)}` : ""}${a.decision.by ? ` <small>(${esc(a.decision.by)} — ${fmtDateTime(a.decision.at)})</small>` : ""}` : "لم يُحدد بعد"}</td></tr>
   </table>
   <h2>ثانيًا: إقرار الطالب (ميثاق الاختبار)</h2>
   <div class="pl">${a.pledge ? `<span class="ok">✍️ وقّع الطالب إلكترونيًا بالموافقة على ميثاق الاختبار</span> باسم «<b>${esc(a.pledge.name)}</b>» بتاريخ ${fmtDateTime(a.pledge.at)} (إصدار ${esc(a.pledge.v || "")})، وأقر بالبنود التالية:` : `<span class="bad">لا يوجد توقيع إلكتروني مسجل لهذه المحاولة.</span> بنود الميثاق المعمول به:`}
@@ -179,4 +180,34 @@ export function printCheatReport({ exam, a, evidence = [], owner = "" }) {
   <div class="sign"><div>المراقب</div><div>أستاذ المقرر</div><div>رئيس الكنترول / وكيل الكلية</div></div>
   <p dir="ltr" style="text-align:center;font-size:10px;color:#9aa3b8;margin-top:14px">© 2026 All Rights Reserved — Designed &amp; Developed by Dr. Alaa Dawood</p>`;
   return openPrint(`محضر غش — ${a.name}`, css, body);
+}
+
+// ------------------------------------------------------------- قائمة الطلاب الذين سُجلت عليهم خروقات
+export function printCheatersList({ exam, rows, owner = "" }) {
+  const byExam = {};
+  rows.forEach(r => { const k = r.a.examId; (byExam[k] = byExam[k] || { course: r.a.course, title: r.a.examTitle, list: [] }).list.push(r); });
+  const css = `@page{size:A4 landscape;margin:12mm}
+  .head{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;border-bottom:3px double #8b1d2c;padding-bottom:10px;margin-bottom:12px}
+  .head .r{font-weight:700;line-height:1.8;font-size:13px}.head .l{text-align:left;font-size:12px;line-height:1.9;color:#333}
+  .seal{width:74px;height:74px;border-radius:50%;border:2px solid #8b1d2c;display:grid;place-items:center;font:800 11px "Cairo";color:#8b1d2c;text-align:center;line-height:1.3}
+  h1{font:800 21px "Cairo";text-align:center;color:#8b1d2c;margin:2px 0 8px}
+  h2{font:800 14px "Cairo";color:#1b2d5c;margin:14px 0 6px}
+  table{width:100%;border-collapse:collapse;font-size:11.5px}
+  th{background:#8b1d2c;color:#fff;padding:6px;border:1px solid #8b1d2c}
+  td{border:1px solid #b8c0cf;padding:5px 6px;text-align:center;vertical-align:top}
+  td.n{text-align:right;font-weight:700}td.t{text-align:right;font-size:10.5px;line-height:1.6}
+  tr:nth-child(even) td{background:#f8f9fc}thead{display:table-header-group}tr{page-break-inside:avoid}
+  .sign{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;margin-top:28px;text-align:center;font-size:13px;font-weight:700;page-break-inside:avoid}
+  .sign div{border-top:1px dashed #69748f;padding-top:6px}`;
+  const body = `
+  <div class="head"><div class="r">${esc(SETTINGS.platformName)}<br>${esc(SETTINGS.department || "")}</div><div class="seal">قائمة<br>الخروقات</div><div class="l">التاريخ: ${today()}<br>${owner ? "أستاذ المقرر: " + esc(owner) : ""}</div></div>
+  <h1>قائمة الطلاب الذين سُجلت عليهم خروقات أثناء الاختبار</h1>
+  ${Object.values(byExam).map(g => `<h2>📚 ${esc(g.course)} — ${esc(g.title)} (${g.list.length} طالب)</h2>
+  <table><thead><tr><th>م</th><th>اسم الطالب</th><th>رقم الجلوس</th><th>المجموعة</th><th>عدد الخروقات</th><th style="width:38%">الخروقات المسجلة</th><th>الدرجة</th><th>الإجراء</th></tr></thead><tbody>
+  ${g.list.map((r, i) => `<tr><td>${i + 1}</td><td class="n">${esc(r.a.name)}</td><td>${esc(r.a.seat || "—")}</td><td>${esc(r.a.group)}</td><td><b>${r.a.violationCount || 0}</b></td>
+    <td class="t">${(r.a.violations || []).slice().sort((x, y) => x.at - y.at).map(v => `${fmtTime(v.at)} — ${esc(v.type)}`).join("<br>")}</td>
+    <td>${r.sc ? `${r.sc.s} / ${r.sc.t}` : "—"}</td><td>${esc(r.dec || "")}</td></tr>`).join("")}</tbody></table>`).join("")}
+  <div class="sign"><div>المراقب</div><div>أستاذ المقرر</div><div>رئيس الكنترول / وكيل الكلية</div></div>
+  <p dir="ltr" style="text-align:center;font-size:10px;color:#9aa3b8;margin-top:14px">© 2026 All Rights Reserved — Designed &amp; Developed by Dr. Alaa Dawood</p>`;
+  return openPrint("قائمة الطلاب — الخروقات", css, body);
 }

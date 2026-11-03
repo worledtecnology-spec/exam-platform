@@ -9,7 +9,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@600;700;800&family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=20261103b">
+<link rel="stylesheet" href="style.css?v=20261103i">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.8.0/mammoth.browser.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
@@ -42,6 +42,7 @@
     <button class="nav-btn act" data-tab="live">📡 المتابعة المباشرة <span class="cnt hidden" id="alertCnt">0</span></button>
     <button class="nav-btn" data-tab="exams">🗂️ المواد والاختبارات</button>
     <button class="nav-btn" data-tab="rosters">👥 كشوف الطلاب</button>
+    <button class="nav-btn" data-tab="breaches">🚨 الخروقات والإجراءات <span class="cnt hidden" id="brCnt">0</span></button>
     <button class="nav-btn" data-tab="results">📋 النتائج والتصحيح <span class="cnt hidden" id="pendCnt" style="background:var(--info)">0</span></button>
     <button class="nav-btn" data-tab="reports">📊 التقارير والتحليلات</button>
     <button class="nav-btn super-only hidden" data-tab="teachers">🧑‍🏫 المعلمون</button>
@@ -59,6 +60,7 @@
     <button class="nav-btn act" data-tab="live">📡 المتابعة</button>
     <button class="nav-btn" data-tab="exams">🗂️ الاختبارات</button>
     <button class="nav-btn" data-tab="rosters">👥 الكشوف</button>
+    <button class="nav-btn" data-tab="breaches">🚨 الخروقات</button>
     <button class="nav-btn" data-tab="results">📋 النتائج</button>
     <button class="nav-btn" data-tab="reports">📊 التقارير</button>
     <button class="nav-btn super-only hidden" data-tab="teachers">🧑‍🏫</button>
@@ -127,7 +129,7 @@
             <label class="field"><span>كشف الوجه بالذكاء الاصطناعي</span><select class="input" id="nFace"><option value="1">مفعّل (غياب / أكثر من شخص / النظر بعيدًا)</option><option value="0">غير مفعّل</option></select></label>
             <label class="field"><span>📍 مكان أداء الاختبار</span><select class="input" id="nGeo"><option value="1">داخل الكلية فقط</option><option value="0">من أي مكان</option></select></label>
             <label class="field"><span>نطاق السماح حول الكلية (متر)</span><input class="input" id="nRadius" type="number" min="20" max="5000" value="300"></label>
-            <label class="field"><span>🏫 رمز القاعة (للدخول من داخل القاعة فقط)</span><select class="input" id="nHall"><option value="0">غير مطلوب</option><option value="1">مطلوب — الطالب يكتب الرمز المعروض على شاشة القاعة</option></select></label>
+
           </div>
           <div class="drop" id="drop">
             <input type="file" id="nFile" accept=".docx,.xlsx,.xls,.csv">
@@ -193,6 +195,23 @@
         <div class="tbl-wrap"><table class="tbl"><thead><tr>
           <th class="sel-col"><input type="checkbox" id="rAll" title="تحديد الكل" aria-label="تحديد الكل"></th><th>م</th><th>اسم الطالب</th><th>المجموعة</th><th>المقرر</th><th>الدرجة</th><th>النسبة</th><th>التقدير</th><th>الحالة</th><th>الغش</th><th>الموقع</th><th>التسليم</th><th></th>
         </tr></thead><tbody id="rBody"></tbody></table></div>
+      </div>
+    </section>
+
+    <!-- ========== الخروقات والإجراءات ========== -->
+    <section class="tab hidden" id="tab-breaches">
+      <div class="ahead"><div><h1>الخروقات والإجراءات</h1><p>كل الخروقات المسجلة على كل طالب بالأدلة — راجعها وحدد الإجراء المناسب لكل طالب (لا يوجد أي خصم تلقائي)</p></div>
+        <div class="toolbar"><button class="btn gold" id="btnBrPrint">🖨️ قائمة الطلاب الغشاشين</button><button class="btn primary" id="btnBrExport">⬇️ Excel الخروقات والإجراءات</button></div></div>
+      <div class="panel">
+        <div class="panel-h">
+          <div class="toolbar">
+            <select class="input" id="bExam"></select>
+            <select class="input" id="bFilter" style="min-width:170px"><option value="pending">لم يُحدد إجراء</option><option value="">كل من عليه خروقات</option><option value="done">تم تحديد إجراء</option><option value="all">كل الطلاب</option></select>
+            <input class="input" id="bSearch" placeholder="🔍 بحث بالاسم أو رقم الجلوس">
+          </div>
+          <span class="badge b-w0" id="bCount">0</span>
+        </div>
+        <div class="tbl-wrap"><table class="tbl"><thead><tr><th>الطالب</th><th>المجموعة</th><th>الخروقات</th><th>ملاحظات السلوك</th><th style="min-width:260px">أهم ما سُجل</th><th>الدرجة</th><th>الإجراء</th><th></th></tr></thead><tbody id="bBody"></tbody></table></div>
       </div>
     </section>
 
@@ -276,6 +295,6 @@
 <div class="toasts" id="toasts"></div>
 <div class="overlay hidden" id="modal"><div class="modal-card" id="modalCard"></div></div>
 
-<script type="module" src="admin.js?v=20261103b"></script>
+<script type="module" src="admin.js?v=20261103i"></script>
 </body>
 </html>

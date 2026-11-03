@@ -101,6 +101,16 @@ export function distanceM(a, b) {
   return 2 * R * Math.asin(Math.sqrt(h));
 }
 // هل الطالب داخل نطاق المكان المحدد؟
+// قرار الدخول المرن: يُمنع الطالب فقط لو موقعه «بعيد بالتأكيد» عن مكان الاختبار.
+// لو الموقع غير متاح أو غير دقيق يُسمح له (strict=false) ويُسجَّل ذلك للمشرف.
+export function geoDecide(loc, fence, strict = false) {
+  if (!loc) return { ok: !strict, verified: false, reason: "noloc" };
+  const d = Math.round(distanceM(loc, fence)), acc = loc.accuracy || 0, r = fence.radius;
+  if (d <= r + Math.min(acc, 100)) return { ok: true, verified: true, reason: "", d };
+  if (d - acc > r && acc <= (fence.maxAccuracy || 500)) return { ok: false, verified: true, reason: "far", d };
+  if (d - acc > Math.max(r, 2000)) return { ok: false, verified: true, reason: "far", d }; // بعيد جدًا حتى مع ضعف الدقة
+  return { ok: !strict, verified: false, reason: "inaccurate", d };
+}
 export function geoCheck(loc, fence, maxAcc = 500) {
   if (!loc) return { ok: false, reason: "noloc" };
   const d = Math.round(distanceM(loc, fence));
