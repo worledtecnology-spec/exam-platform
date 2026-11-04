@@ -10,7 +10,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@600;700;800&family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=20261103i">
+<link rel="stylesheet" href="style.css?v=20261104c">
 </head>
 <body class="no-select app">
 
@@ -132,8 +132,8 @@
 
   <!-- الإنذار الثاني: إغلاق ومسح الإجابات -->
   <section class="screen card final restart hidden" id="scrRestart">
-    <div class="big-ic">🗑️</div>
-    <h2>إنذار ثانٍ — تم إغلاق اختبارك</h2>
+    <div class="big-ic" id="rsIc">🗑️</div>
+    <h2 id="rsTitle">إنذار ثانٍ — تم إغلاق اختبارك</h2>
     <p id="restartMsg">تم رصد محاولة غش للمرة الثانية، لذلك <b>تم مسح جميع إجاباتك</b>. يمكنك الدخول مرة أخرى والإجابة من البداية.</p>
     <div class="final-warn">⚠️ أي محاولة غش أخرى = <b>غلق نهائي ورسوب في الاختبار</b></div>
     <button class="btn danger lg" id="btnRestart" style="margin-top:1.2rem">الدخول مرة أخرى والبدء من جديد</button>
@@ -218,6 +218,7 @@
       <div class="big-timer" id="timer2">--:--</div>
       <div class="tbar"><i id="tbarFill"></i></div>
     </div>
+    <div class="conduct green" id="conduct"><b>حالتك: 🟢 ملتزم</b><small>كمّل بنفس التركيز 👏</small></div>
     <h3>الأسئلة <small>— اضغط على أي رقم للانتقال إليه</small></h3>
     <div class="legend"><span><i class="lg-done"></i>تمت الإجابة</span><span><i class="lg-cur"></i>الحالي</span><span><i class="lg-none"></i>لم تُجب</span></div>
     <div class="qnav" id="qNav"></div>
@@ -228,7 +229,8 @@
   </aside>
 </div>
 <div class="watermark hidden" id="watermark"></div>
-<div class="selfcam hidden" id="selfcam"><video id="camLive" autoplay playsinline muted></video><span><i></i> REC</span><b class="face-state" id="faceState"></b></div>
+<div class="selfcam hidden" id="selfcam"><video id="camLive" autoplay playsinline muted></video><span><i></i> REC</span><b class="face-state" id="faceState"></b><em class="face-msg" id="faceMsg"></em></div>
+<div class="m-conduct hidden" id="mConduct"></div>
 
 <!-- الإنذار الأحمر -->
 <div class="overlay red hidden" id="camBlock" role="alertdialog" aria-live="assertive">
@@ -274,10 +276,10 @@
   </div>
 </div>
 <div class="s-toast hidden" id="sToast"></div>
-<div class="wl-pop hidden" id="warnPop" role="dialog" aria-label="قائمة الإنذارات"><div class="wl-pop-h"><b>⚠️ قائمة الإنذارات</b><button type="button" id="wlPopClose" aria-label="إغلاق">✕</button></div><ol id="wlPopList"></ol><small>الإنذارات مسجلة بالأدلة — المشرف هيحدد الإجراء. الاختبار مش هيتقفل عليك.</small></div>
+<div class="wl-pop hidden" id="warnPop" role="dialog" aria-label="قائمة الإنذارات"><div class="wl-pop-h"><b>⚠️ قائمة الإنذارات</b><span id="wlPopState" class="wl-state"></span><button type="button" id="wlPopClose" aria-label="إغلاق">✕</button></div><ol id="wlPopList"></ol><small>الإنذارات مسجلة بالأدلة — المشرف هيحدد الإجراء. الاختبار مش هيتقفل عليك.</small></div>
 <div class="time-alert stu-warn hidden" id="vWarn" role="alert" aria-live="assertive"><span class="ta-ic" id="vwIc">⚠️</span><div class="ta-txt"><b id="vwTitle"></b><small id="vwSub"></small></div><button type="button" class="ta-x" id="vwClose" aria-label="إغلاق">✕</button></div>
 <div class="time-alert hidden" id="timeAlert" role="alert" aria-live="assertive"><span class="ta-ic">⏰</span><div class="ta-txt"><b id="taTitle"></b><small id="taSub"></small></div><button type="button" class="ta-x" id="taClose" aria-label="إغلاق">✕</button></div>
 
-<script type="module" src="student.js?v=20261103i"></script>
+<script type="module" src="student.js?v=20261104c"></script>
 </body>
 </html>

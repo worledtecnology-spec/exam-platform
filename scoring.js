@@ -66,14 +66,16 @@ export function scoreAttempt(a, exam, keyDoc) {
     s += pts; per[q.id] = { ...r, pts: Math.round(pts * 100) / 100, of: p };
   });
   const failed = a.status === "locked";
-  s = failed ? 0 : Math.max(0, Math.round(s * 100) / 100);
+  const earned = Math.max(0, Math.round(s * 100) / 100); // درجة ما أجاب عنه فعلًا (حتى لو سؤال واحد) قبل أي إجراء
+  const answered = qs.filter(q => isAnswered(q, a.answers ? a.answers[q.id] : undefined)).length;
+  s = failed ? 0 : earned;
   // قرار المشرف بخصوص الخروقات (لا يوجد أي خصم تلقائي)
   const raw = s, dec = a.decision || {};
   let failedNow = failed;
   if (!failed && dec.type === "deduct" && +dec.deduct > 0) s = Math.max(0, Math.round((s - +dec.deduct) * 100) / 100);
   if (dec.type === "fail" || dec.type === "cancel") { s = 0; failedNow = true; }
   const ded = Math.round((raw - s) * 100) / 100;
-  return { s, t, pct: t ? Math.round(s / t * 1000) / 10 : 0, pending, failed: failedNow, per, n: qs.length, raw, ded };
+  return { s, t, pct: t ? Math.round(s / t * 1000) / 10 : 0, pending, failed: failedNow, per, n: qs.length, raw, ded, earned, answered };
 }
 
 // نصوص العرض للمراجعة

@@ -204,10 +204,66 @@ export function printCheatersList({ exam, rows, owner = "" }) {
   <h1>قائمة الطلاب الذين سُجلت عليهم خروقات أثناء الاختبار</h1>
   ${Object.values(byExam).map(g => `<h2>📚 ${esc(g.course)} — ${esc(g.title)} (${g.list.length} طالب)</h2>
   <table><thead><tr><th>م</th><th>اسم الطالب</th><th>رقم الجلوس</th><th>المجموعة</th><th>عدد الخروقات</th><th style="width:38%">الخروقات المسجلة</th><th>الدرجة</th><th>الإجراء</th></tr></thead><tbody>
-  ${g.list.map((r, i) => `<tr><td>${i + 1}</td><td class="n">${esc(r.a.name)}</td><td>${esc(r.a.seat || "—")}</td><td>${esc(r.a.group)}</td><td><b>${r.a.violationCount || 0}</b></td>
-    <td class="t">${(r.a.violations || []).slice().sort((x, y) => x.at - y.at).map(v => `${fmtTime(v.at)} — ${esc(v.type)}`).join("<br>")}</td>
+  ${g.list.map((r, i) => `<tr><td>${i + 1}</td><td class="n">${esc(r.a.name)}</td><td>${esc(r.a.seat || "—")}</td><td>${esc(r.a.group)}</td><td><b>${(r.a.violationCount || 0) + (r.a.history || []).reduce((s, h) => s + (h.violationCount || 0), 0)}</b>${(r.a.history || []).length ? `<br><small>أعاد ${r.a.history.length}</small>` : ""}</td>
+    <td class="t">${[...(r.a.history || []).flatMap(h => (h.violations || []).map(v => ({ ...v, old: 1 }))), ...(r.a.violations || [])].sort((x, y) => x.at - y.at).map(v => `${fmtTime(v.at)} — ${esc(v.type)}${v.old ? " <i>(قبل الإعادة)</i>" : ""}`).join("<br>")}</td>
     <td>${r.sc ? `${r.sc.s} / ${r.sc.t}` : "—"}</td><td>${esc(r.dec || "")}</td></tr>`).join("")}</tbody></table>`).join("")}
   <div class="sign"><div>المراقب</div><div>أستاذ المقرر</div><div>رئيس الكنترول / وكيل الكلية</div></div>
   <p dir="ltr" style="text-align:center;font-size:10px;color:#9aa3b8;margin-top:14px">© 2026 All Rights Reserved — Designed &amp; Developed by Dr. Alaa Dawood</p>`;
   return openPrint("قائمة الطلاب — الخروقات", css, body);
+}
+
+// ------------------------------------------------------------- كشف الطلاب الملتزمين (سلّموا بدون أي إنذارات) — أبجديًا بالدرجات
+export function printCleanList({ title = "", rows, owner = "" }) {
+  const css = `@page{size:A4;margin:13mm 12mm}
+  .head{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;border-bottom:3px double #0f7a4f;padding-bottom:10px;margin-bottom:12px}
+  .head .r{font-weight:700;line-height:1.8;font-size:13px}.head .l{text-align:left;font-size:12px;line-height:1.9;color:#333}
+  .seal{width:74px;height:74px;border-radius:50%;border:2px solid #0f7a4f;display:grid;place-items:center;font:800 11px "Cairo";color:#0f7a4f;text-align:center;line-height:1.3}
+  h1{font:800 20px "Cairo";text-align:center;color:#0f7a4f;margin:2px 0 4px}.sub{text-align:center;margin-bottom:10px;font-size:13px}
+  table{width:100%;border-collapse:collapse;font-size:12.5px}th{background:#0f7a4f;color:#fff;padding:7px 6px;border:1px solid #0f7a4f}
+  td{border:1px solid #b8c0cf;padding:6px;text-align:center}td.n{text-align:right;font-weight:700}tr:nth-child(even) td{background:#f4fbf7}
+  thead{display:table-header-group}tr{page-break-inside:avoid}
+  .sign{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;margin-top:30px;text-align:center;font-size:13px;font-weight:700}.sign div{border-top:1px dashed #69748f;padding-top:6px}`;
+  const body = `<div class="head"><div class="r">${esc(SETTINGS.platformName)}<br>${esc(SETTINGS.department || "")}</div><div class="seal">كشف<br>الملتزمين</div><div class="l">التاريخ: ${today()}<br>${owner ? "أستاذ المقرر: " + esc(owner) : ""}</div></div>
+  <h1>كشف الطلاب الذين سلّموا الاختبار بدون أي إنذارات</h1><div class="sub">${esc(title)} — عدد الطلاب: <b>${rows.length}</b></div>
+  <table><thead><tr><th>م</th><th>اسم الطالب</th><th>رقم الجلوس</th><th>المجموعة</th><th>الدرجة</th><th>النسبة</th><th>التقدير</th><th>وقت التسليم</th></tr></thead><tbody>
+  ${rows.map((r, i) => `<tr><td>${i + 1}</td><td class="n">${esc(r.a.name)}</td><td>${esc(r.a.seat || "—")}</td><td>${esc(r.a.group)}</td><td><b>${r.sc ? r.sc.s : "—"}</b>${r.sc ? ` / ${r.sc.t}` : ""}</td><td>${r.sc ? r.sc.pct + "%" : "—"}</td><td style="color:${r.g ? r.g.color : "#333"};font-weight:700">${esc(r.g ? r.g.label : "")}</td><td>${fmtDateTime(r.a.submittedAtMs)}</td></tr>`).join("")}
+  </tbody></table>
+  <div class="sign"><div>المراقب</div><div>أستاذ المقرر</div><div>رئيس الكنترول</div></div>
+  <p dir="ltr" style="text-align:center;font-size:10px;color:#9aa3b8;margin-top:14px">© 2026 All Rights Reserved — Designed &amp; Developed by Dr. Alaa Dawood</p>`;
+  return openPrint("كشف الطلاب الملتزمين", css, body);
+}
+
+// ------------------------------------------------------------- كشف المخالفين بالأدلة الكاملة — طالب في كل صفحة
+export function printViolatorsReport({ title = "", rows, owner = "" }) {
+  const css = `@page{size:A4;margin:11mm}
+  .head{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;border-bottom:3px double #8b1d2c;padding-bottom:8px;margin-bottom:10px}
+  .head .r{font-weight:700;line-height:1.7;font-size:12.5px}.head .l{text-align:left;font-size:11.5px;line-height:1.8;color:#333}
+  .seal{width:70px;height:70px;border-radius:50%;border:2px solid #8b1d2c;display:grid;place-items:center;font:800 10.5px "Cairo";color:#8b1d2c;text-align:center;line-height:1.3}
+  h1{font:800 19px "Cairo";text-align:center;color:#8b1d2c;margin:2px 0 6px}
+  .idx{width:100%;border-collapse:collapse;font-size:11.5px;margin-bottom:6px}.idx th{background:#8b1d2c;color:#fff;padding:5px;border:1px solid #8b1d2c}.idx td{border:1px solid #c9cfdc;padding:4px 6px;text-align:center}.idx td.n{text-align:right;font-weight:700}
+  .st{page-break-before:always}.st h2{font:800 16px "Cairo";color:#1b2d5c;margin:0 0 6px;border-right:5px solid #8b1d2c;padding-right:8px}
+  .kv{display:grid;grid-template-columns:repeat(4,1fr);gap:4px 10px;font-size:11.5px;margin-bottom:6px}.kv div{background:#f4f6fb;border-radius:6px;padding:4px 7px}.kv b{color:#1b2d5c}
+  .sug{border:2px solid #8b1d2c;border-radius:8px;padding:6px 10px;margin:6px 0;font-size:12.5px;background:#fff5f6}.sug.l0,.sug.l1{border-color:#b45309;background:#fffbeb}
+  table.v{width:100%;border-collapse:collapse;font-size:11px}table.v th{background:#f1f3f8;color:#1b2d5c;padding:4px;border:1px solid #c9cfdc}table.v td{border:1px solid #c9cfdc;padding:3px 6px;text-align:right}
+  .shots{display:grid;grid-template-columns:repeat(4,1fr);gap:5px;margin-top:6px}.shots figure{margin:0;border:1px solid #c9cfdc;border-radius:5px;overflow:hidden;page-break-inside:avoid}.shots img{width:100%;display:block}.shots figcaption{font-size:8.5px;padding:2px 4px;background:#f6f7fb;line-height:1.35}
+  h3{font:800 12.5px "Cairo";color:#8b1d2c;margin:8px 0 4px}.muted{color:#69748f;font-size:11px}
+  .sign{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:14px;text-align:center;font-size:11.5px;font-weight:700}.sign div{border-top:1px dashed #69748f;padding-top:5px}`;
+  const LV = { record: "خرق مسجّل", warn: "إنذار", restart: "مسح وإعادة", fail: "رسوب" };
+  const body = `<div class="head"><div class="r">${esc(SETTINGS.platformName)}<br>${esc(SETTINGS.department || "")}</div><div class="seal">كشف<br>المخالفين<br>بالأدلة</div><div class="l">التاريخ: ${today()}<br>${owner ? "أستاذ المقرر: " + esc(owner) : ""}</div></div>
+  <h1>كشف الطلاب المخالفين — الخروقات والأدلة والإجراء المقترح</h1><p class="muted" style="text-align:center">${esc(title)} — عدد الطلاب: <b>${rows.length}</b> (مرتب أبجديًا)</p>
+  <table class="idx"><thead><tr><th>م</th><th>اسم الطالب</th><th>الجلوس</th><th>المجموعة</th><th>الخروقات</th><th>ملاحظات</th><th>درجة ما أجاب عنه</th><th>مقترح المنصة</th><th>قرار المشرف</th></tr></thead><tbody>
+  ${rows.map((r, i) => `<tr><td>${i + 1}</td><td class="n">${esc(r.a.name)}</td><td>${esc(r.a.seat || "—")}</td><td>${esc(r.a.group)}</td><td><b>${r.V.length}</b></td><td>${r.F.length}</td><td>${r.sc ? `${r.sc.earned} / ${r.sc.t} (أجاب ${r.sc.answered}/${r.sc.n})` : "—"}</td><td>${esc(r.sug.t)}</td><td>${esc(r.dec || "لم يُحدد")}</td></tr>`).join("")}</tbody></table>
+  ${rows.map((r, i) => `<section class="st"><h2>${i + 1}. ${esc(r.a.name)} ${r.sug.report ? "— 🧾 مطلوب تحرير محضر غش" : ""}</h2>
+    <div class="kv"><div>الجلوس: <b>${esc(r.a.seat || "—")}</b></div><div>المجموعة: <b>${esc(r.a.group)}</b></div><div>المقرر: <b>${esc(r.a.course)}</b></div><div>الاختبار: <b>${esc(r.a.examTitle)}</b></div>
+      <div>بدأ: <b>${fmtDateTime(r.a.startedAtMs)}</b></div><div>سلّم: <b>${r.a.submittedAtMs ? fmtDateTime(r.a.submittedAtMs) : "لم يسلّم"}</b></div><div>الجهاز: <b>${esc(r.dev || "—")}</b></div><div>الميثاق: <b>${r.a.pledge ? "وقّع ✓ " + fmtDateTime(r.a.pledge.at) : "—"}</b></div>
+      <div>أجاب عن: <b>${r.sc ? `${r.sc.answered} من ${r.sc.n}` : "—"}</b></div><div>درجة ما أجاب عنه: <b>${r.sc ? `${r.sc.earned} / ${r.sc.t}` : "—"}</b></div><div>الدرجة بعد القرار: <b>${r.sc ? `${r.sc.s} / ${r.sc.t}` : "—"}</b></div><div>مرات الإعادة: <b>${(r.a.history || []).length}</b></div></div>
+    <div class="sug l${r.sug.lvl}">💡 <b>مقترح المنصة:</b> ${esc(r.sug.t)} <span class="muted">(${esc(r.sug.why)})</span>${r.dec ? `<br>⚖️ <b>قرار المشرف:</b> ${esc(r.dec)}${r.a.decision && r.a.decision.note ? ` — ${esc(r.a.decision.note)}` : ""}` : ""}</div>
+    <h3>🚨 الخروقات (${r.V.length})</h3>
+    ${r.V.length ? `<table class="v"><thead><tr><th style="width:28px">م</th><th style="width:90px">التوقيت</th><th>الخرق</th></tr></thead><tbody>${r.V.map((v, k) => `<tr><td>${k + 1}</td><td>${fmtTime(v.at)}</td><td>${esc(v.type)}${v.old ? " <i class='muted'>(قبل الإعادة)</i>" : ""}</td></tr>`).join("")}</tbody></table>` : `<p class="muted">لا توجد خروقات — ملاحظات سلوك فقط.</p>`}
+    ${r.F.length ? `<h3>👀 ملاحظات السلوك (${r.F.length})</h3><table class="v"><tbody>${r.F.slice(0, 40).map(f => `<tr><td style="width:90px">${fmtTime(f.at)}</td><td>${esc(String(f.type).replace(/^🔎\s*/, ""))}</td></tr>`).join("")}</tbody></table>` : ""}
+    <h3>📷 الأدلة المصوّرة (${r.shots.length})</h3>
+    ${r.shots.length ? `<div class="shots">${r.shots.map(e => `<figure><img src="${esc(safeImg(e.img))}" alt=""><figcaption>${fmtTime(e.at)} — ${esc(e.type || "")}${e.audio ? " 🎙️ تسجيل صوتي على المنصة" : ""}</figcaption></figure>`).join("")}</div>` : `<p class="muted">لا توجد صور.</p>`}
+    <div class="sign"><div>المراقب</div><div>أستاذ المقرر</div><div>رئيس الكنترول</div></div></section>`).join("")}
+  <p dir="ltr" style="text-align:center;font-size:10px;color:#9aa3b8;margin-top:14px">© 2026 All Rights Reserved — Designed &amp; Developed by Dr. Alaa Dawood</p>`;
+  return openPrint("كشف المخالفين بالأدلة", css, body);
 }

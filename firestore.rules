@@ -119,14 +119,18 @@ service cloud.firestore {
         let d = request.resource.data;
         let o = resource.data;
         let ch = d.diff(o).affectedKeys();
+        // إعادة الاختبار بقرار المشرف: الطالب يبدأ بوقت جديد كامل (مرة واحدة لكل إعادة)
+        let retaking = o.status == 'suspended' && o.get('retakeFresh', false) == true
+                       && d.get('retakeFresh', true) == false && d.get('startedAt', null) == request.time;
         return o.status in ['in_progress', 'suspended']
           && ch.hasOnly(['answers', 'qPos', 'violations', 'violationCount', 'lastViolationAt', 'status', 'flags', 'flagCount',
                          'submittedAt', 'submittedAtMs', 'lockedReason', 'failed', 'lastSeenMs', 'autoSubmitted',
-                         'restarts', 'resumeReq', 'resumeUsed', 'deviceId'])
+                         'restarts', 'resumeReq', 'resumeUsed', 'deviceId', 'startedAt', 'startedAtMs', 'retakeFresh'])
+          && (!ch.hasAny(['startedAt', 'startedAtMs', 'retakeFresh']) || retaking)
           && d.status in ['in_progress', 'suspended', 'submitted', 'locked']
           && d.violationCount is int && d.violationCount >= o.violationCount
           && d.restarts is int && d.restarts >= o.restarts
-          && (!ch.hasAny(['answers', 'qPos']) || inTime(o))
+          && (!ch.hasAny(['answers', 'qPos']) || inTime(o) || (retaking && d.answers.size() == 0))
           && d.answers is map && d.answers.size() <= 300
           && (!ch.hasAny(['qPos']) || d.qPos is int)
           && (!ch.hasAny(['flagCount']) || d.flagCount is int)

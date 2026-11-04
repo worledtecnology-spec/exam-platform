@@ -112,3 +112,20 @@ document.addEventListener("click", e => {
   const fn = window["__" + el.dataset.act];
   if (typeof fn === "function") fn(el.dataset.this ? el : el.dataset.arg);
 });
+
+// ---- مقترح المنصة للإجراء حسب كمّ ونوع الخروقات (المشرف هو صاحب القرار النهائي)
+const SERIOUS = /موبايل|شخص آخر|أكثر من شخص|كاميرا افتراضية|صورة الكاميرا ثابتة|تصوير الشاشة/;
+export function allViolations(a) {
+  return [...(a.history || []).flatMap(h => (h.violations || []).map(v => ({ ...v, old: true }))), ...(a.violations || [])].sort((x, y) => x.at - y.at);
+}
+export function warnFlags(a) { return (a.flags || []).filter(f => /^🔎/.test(f.type || "")); }
+export function suggestAction(a) {
+  const V = allViolations(a), m = V.length, n = warnFlags(a).length, serious = V.filter(v => SERIOUS.test(v.type)).length;
+  const leaves = V.filter(v => /تبويب|تطبيق|مغادرة/.test(v.type)).length;
+  if (m >= 5 || serious >= 2 || (serious >= 1 && m >= 3)) return { type: "refer", t: "تحرير محضر غش وإحالة للتحقيق", lvl: 4, report: true, why: `${m} خرق${serious ? ` منها ${serious} خطير (موبايل/شخص آخر/تزييف)` : ""}` };
+  if (m >= 3 || serious === 1) return { type: "refer", t: "تحرير محضر غش", lvl: 3, report: true, why: serious ? "ظهور موبايل/شخص آخر أو تزييف الكاميرا" : `${m} خروقات متكررة` };
+  if (m === 2 || leaves >= 2 || n >= 8) return { type: "deduct", t: "خصم درجات + لفت نظر", lvl: 2, report: false, why: `${m} خرق و${n} ملاحظة سلوك` };
+  if (m === 1 || n >= 3) return { type: "notice", t: "لفت نظر / تنبيه", lvl: 1, report: false, why: m ? "خرق واحد" : `${n} ملاحظات سلوك` };
+  return { type: "none", t: "لا إجراء — ملتزم", lvl: 0, report: false, why: n ? `${n} ملاحظة بسيطة` : "لا توجد ملاحظات" };
+}
+export const needsReport = a => (a.decision && a.decision.type === "refer") || suggestAction(a).report;

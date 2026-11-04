@@ -8,8 +8,9 @@ import { isConfigured, esc, fmtDateTime, fmtTime, mmss, LETTERS, frameGuard, ini
 import { parseWordText, parseRows, wordHtmlToText, TYPE_LABEL, LEVEL_LABEL, splitAccepted, normAr } from "./parser.js";
 import { questionsOf, answerText, correctText, isAnswered } from "./scoring.js";
 import { gradeOf, isExpired, isFinished, computeReport } from "./analytics.js";
-import { printGradeSheet, printCheatReport, printCheatersList } from "./print.js";
+import { printGradeSheet, printCheatReport, printCheatersList, printCleanList, printViolatorsReport } from "./print.js";
 import { deviceText } from "./device.js";
+import { suggestAction, allViolations, warnFlags, needsReport } from "./admin-shared.js";
 import { $, S, hooks, scoreOf, passOf, nflags, pctColor, mapLink, byName, statusBadge, warnBadge, toast, loadEvidence, shotsHtml, timelineHtml, resultRow, RES_W, sheet, safeName } from "./admin-shared.js";
 import { initReports, renderReports } from "./reports.js";
 import { mountGuide } from "./guide.js";
@@ -186,6 +187,7 @@ function renderAll() {
   if (subModalId) renderSubmitStatus();
   if (curTab() === "results") renderResults();
   if (curTab() === "breaches") renderBreaches(); else updateBrCount();
+  updateRepCount();
   if (curTab() === "reports") { clearTimeout(repTimer); repTimer = setTimeout(() => { if (!document.querySelector("#ppOut")) renderReports(); }, 1200); }
 }
 const myAttempts = () => Object.values(S.attempts).filter(a => S.me.isSuper || isMine(S.exams[a.examId]) || a.owner === S.me.email);
@@ -405,6 +407,7 @@ window.__detail = async id => {
         <dt>الدرجة</dt><dd>${sc ? `<span class="score">${sc.s} <small>/ ${sc.t}</small></span> (${sc.pct}%) — <b style="color:${gr.color}">${gr.label}</b>${sc.pending ? ` <span class="badge b-run">${sc.pending} مقالي ينتظر التصحيح</span>` : ""}` : "—"}</dd>
         <dt>البدء / التسليم</dt><dd>${fmtDateTime(a.startedAtMs)} ← ${fmtDateTime(a.submittedAtMs)}${a.extraMin ? ` • وقت إضافي ${num(a.extraMin)} د` : ""}</dd>
         <dt>الخروقات والإجراء</dt><dd>${num(a.violationCount)} خرق • ${nflags(a)} ملاحظة — ${decBadge(a)} <button class="btn gold sm" data-act="decide" data-arg="${esc(a.id)}">⚖️ تحديد الإجراء</button></dd>
+        ${(a.history || []).length ? `<dt>الإعادات السابقة</dt><dd>${a.history.map((h, i) => `<div style="margin-bottom:.3rem"><b>المحاولة ${i + 1}</b> — أُعيدت ${fmtDateTime(h.at)}${h.by ? ` بواسطة ${esc(h.by)}` : ""}: ${num(h.violationCount)} خرق، ${num(h.flagCount)} ملاحظة، أجاب عن ${num(h.answered)}${h.score != null ? `، الدرجة ${num(h.score)}/${num(h.of)}` : ""}${(h.violations || []).length ? `<br><small style="color:var(--muted)">${h.violations.map(v => `${fmtTime(v.at)} ${esc(v.type)}`).join(" • ")}</small>` : ""}</div>`).join("")}</dd>` : ""}
         <dt>ميثاق الاختبار</dt><dd>${a.pledge ? `<b style="color:var(--ok)">✍️ وقّع بالموافقة</b> باسم «${esc(a.pledge.name)}» — ${fmtDateTime(a.pledge.at)}` : `<span style="color:var(--muted)">لا يوجد توقيع مسجل</span>`}</dd>
         <dt>الجهاز</dt><dd>${a.device ? `${esc(deviceText(a.device))}<br><small style="color:var(--muted)">الشاشة ${esc(a.device.screen || "")}${a.camera ? " • 📷 كاميرا" : ""}${a.mic ? " • 🎙️ ميكروفون" : ""}</small>` : "—"}</dd>
         <dt>الموقع</dt><dd>${a.geoLock ? `<b style="color:var(--ok)">📍 داخل الكلية</b>${a.geoDist != null ? ` (يبعد ${num(a.geoDist)} م عن المركز)` : ""}<br>` : ""}${a.location ? `<a href="${mapLink(a)}" target="_blank" rel="noopener">📍 فتح على الخريطة</a><br><small style="color:var(--muted)">${esc(a.location.address || `${a.location.lat}, ${a.location.lng}`)} (±${num(a.location.accuracy)}م)</small>` : `<span style="color:var(--danger)">${esc(a.locationError || "غير متاح")}</span>`}</dd>
@@ -420,6 +423,7 @@ window.__detail = async id => {
       ${timelineHtml(a)}
       <div style="display:flex;gap:.6rem;margin-top:1.5rem;flex-wrap:wrap;border-top:1px solid var(--line);padding-top:1.2rem">
         ${a.status === "locked" ? `<button class="btn ok sm" id="mUnlock">↩️ إلغاء الرسوب والسماح بالعودة بنفس الإجابات</button>` : ""}
+        <button class="btn ok sm" data-act="retake" data-arg="${esc(a.id)}">↺ إعادة الاختبار (مع الاحتفاظ بالخروقات)</button>
         <button class="btn gold sm" id="mCheat">🧾 طباعة محضر الغش</button>
         <button class="btn danger sm" id="mReset">↺ السماح له بإعادة الاختبار من الصفر</button>
         ${a.status !== "locked" ? `<button class="btn ghost sm" style="color:var(--danger)" data-act="failNow" data-arg="${esc(a.id)}">⛔ اعتباره راسبًا (غش)</button>` : ""}
@@ -1085,7 +1089,7 @@ const MAJ = f => /موبايل|شخص|سماعة|كاميرا|تبويب|تطب�
 function breachRows() {
   const ex = $("bExam").value, fl = $("bFilter").value, q = $("bSearch").value.trim();
   let R = myAttempts().filter(a => !ex || a.examId === ex);
-  if (fl !== "all") R = R.filter(a => (a.violationCount || 0) > 0 || nflags(a) > 0);
+  if (fl !== "all") R = R.filter(a => (a.violationCount || 0) > 0 || nflags(a) > 0 || (a.history || []).length);
   if (fl === "pending") R = R.filter(a => !a.decision);
   if (fl === "done") R = R.filter(a => a.decision);
   if (q) R = R.filter(a => (a.name || "").includes(q) || String(a.seat || "").includes(q));
@@ -1099,19 +1103,57 @@ function renderBreaches() {
   updateBrCount();
   const R = breachRows();
   $("bCount").textContent = `${R.length} طالب`;
+  setTimeout(updateBSel, 0);
   $("bBody").innerHTML = R.length ? R.map(a => {
     const V = (a.violations || []).map(v => ({ ...v, maj: 1 })), F = (a.flags || []).filter(MAJ);
     const top = [...V, ...F].sort((x, y) => x.at - y.at).slice(-4).map(x => `<div class="br-it ${x.maj ? "maj" : ""}"><time>${fmtTime(x.at)}</time> ${esc(String(x.type).replace(/^🔎\s*/, ""))}</div>`).join("");
     const sc = scoreOf(a);
-    return `<tr><td class="name">${esc(a.name)}${a.seat ? `<br><small style="color:var(--muted)">جلوس ${esc(a.seat)}</small>` : ""}<br><small style="color:var(--muted)">${esc(a.course)}</small></td><td>${esc(a.group)}</td>
+    return `<tr class="${bSel.has(a.id) ? "sel" : ""}"><td class="sel-col"><input type="checkbox" class="bChk" data-id="${esc(a.id)}" ${bSel.has(a.id) ? "checked" : ""} aria-label="تحديد"></td><td class="name">${esc(a.name)}${a.seat ? `<br><small style="color:var(--muted)">جلوس ${esc(a.seat)}</small>` : ""}<br><small style="color:var(--muted)">${esc(a.course)}</small>${(a.history || []).length ? `<br><small style="color:var(--info)">↺ أعاد ${a.history.length} مرة</small>` : ""}${a.status === "suspended" && a.retakeFresh ? `<br><span class="badge b-run">↺ مسموح له بالإعادة</span>` : ""}</td><td>${esc(a.group)}</td>
       <td>${a.violationCount ? `<span class="badge b-w3">🚨 ${num(a.violationCount)}</span>` : "—"}</td><td>${nflags(a) ? `<span class="badge b-w1">🔎 ${nflags(a)}</span>` : "—"}</td>
       <td class="br-list">${top || "<small style='color:var(--muted)'>—</small>"}</td>
-      <td>${sc ? `<b>${sc.s}</b> / ${sc.t}${sc.ded ? `<br><small style="color:var(--danger)">قبل: ${sc.raw}</small>` : ""}` : "—"}</td>
+      <td>${sc ? `<b>${sc.s}</b> / ${sc.t}${sc.ded || sc.failed ? `<br><small style="color:var(--danger)">على ما أجاب: ${sc.earned}</small>` : ""}<br><small style="color:var(--muted)">أجاب ${sc.answered}/${sc.n}</small>` : "—"}</td>
+      <td>${(() => { const g = suggestAction(a); return `<span class="badge ${["b-ok", "b-w1", "b-w2", "b-w3", "b-w3"][g.lvl]}" title="${esc(g.why)}">${g.report ? "🧾 " : ""}${esc(g.t)}</span>`; })()}</td>
       <td>${decBadge(a)}${a.decision && a.decision.note ? `<br><small style="color:var(--muted)">${esc(a.decision.note).slice(0, 60)}</small>` : ""}</td>
-      <td><div class="row-acts"><button class="btn gold sm" data-act="decide" data-arg="${esc(a.id)}">⚖️ الإجراء</button><button class="btn ghost sm" data-act="detail" data-arg="${esc(a.id)}">📷 الأدلة</button></div></td></tr>`;
-  }).join("") : `<tr><td colspan="8"><div class="empty"><div class="e-ic">🛡️</div>${$("bFilter").value === "pending" ? "مفيش طلاب محتاجين قرار" : "لا توجد خروقات مسجلة"}</div></td></tr>`;
+      <td><div class="row-acts"><button class="btn gold sm" data-act="decide" data-arg="${esc(a.id)}">⚖️ الإجراء</button><button class="btn ghost sm" data-act="detail" data-arg="${esc(a.id)}">📷 الأدلة</button><button class="btn ok sm" data-act="retake" data-arg="${esc(a.id)}" title="إعادة الاختبار من الأول بوقت جديد">↺ إعادة</button><button class="btn ghost sm btn-del" data-act="delBreach" data-arg="${esc(a.id)}" title="حذف الطالب ونتيجته">🗑</button></div></td></tr>`;
+  }).join("") : `<tr><td colspan="10"><div class="empty"><div class="e-ic">🛡️</div>${$("bFilter").value === "pending" ? "مفيش طلاب محتاجين قرار" : "لا توجد خروقات مسجلة"}</div></td></tr>`;
 }
 ["bExam", "bFilter"].forEach(id => $(id).onchange = renderBreaches);
+// ---- تحديد طلاب الخروقات: إعادة الاختبار أو الحذف (فردي أو جماعي)
+const bSel = new Set();
+function updateBSel() {
+  const ids = new Set(breachRows().map(a => a.id));
+  [...bSel].forEach(id => { if (!ids.has(id) || !S.attempts[id]) bSel.delete(id); });
+  $("bRetakeSel").classList.toggle("hidden", !bSel.size); $("bRetakeSel").textContent = `↺ إعادة الاختبار للمحددين (${bSel.size})`;
+  $("bDelSel").classList.toggle("hidden", !bSel.size); $("bDelSel").textContent = `🗑 حذف المحددين (${bSel.size})`;
+  const all = $("bAll"); all.checked = !!ids.size && [...ids].every(id => bSel.has(id)); all.indeterminate = !all.checked && bSel.size > 0;
+}
+$("bBody").addEventListener("change", e => { const c = e.target.closest(".bChk"); if (!c) return; c.checked ? bSel.add(c.dataset.id) : bSel.delete(c.dataset.id); c.closest("tr").classList.toggle("sel", c.checked); updateBSel(); });
+$("bAll").onchange = () => { breachRows().forEach(a => $("bAll").checked ? bSel.add(a.id) : bSel.delete(a.id)); renderBreaches(); };
+// إعادة الاختبار: نفس المحاولة تتصفّر بوقت جديد، وسجل الخروقات القديم يتحفظ في «history» والأدلة بتفضل موجودة
+async function retakeStudents(list) {
+  list = list.filter(Boolean); if (!list.length) return;
+  const names = list.slice(0, 8).map(a => "• " + a.name).join("\n") + (list.length > 8 ? `\n… و${list.length - 8} آخرين` : "");
+  if (!confirm(`السماح بإعادة الاختبار من الأول لـ ${list.length === 1 ? "الطالب" : list.length + " طالب"}؟\n\n${names}\n\n• إجاباته الحالية ودرجته هتتمسح وهيبدأ بوقت جديد كامل.\n• خروقاته القديمة وصوره بتتحفظ عندك في ملفه (سجل الإعادات).\n• الطالب يفتح رابط الاختبار بنفس بياناته ويدوس «متابعة».`)) return;
+  let ok = 0;
+  for (const a of list) {
+    const sc = scoreOf(a) || {};
+    const rec = { at: Date.now(), by: S.me.name || S.me.email, status: a.status, violations: (a.violations || []).slice(0, 60), violationCount: a.violationCount || 0, flagCount: a.flagCount || 0, answered: Object.keys(a.answers || {}).length, score: sc.s ?? null, of: sc.t ?? null };
+    try {
+      await updateDoc(doc(db, "attempts", a.id), {
+        status: "suspended", retakeFresh: true, answers: {}, qPos: 0, submittedAtMs: null, autoSubmitted: false, failed: false, lockedReason: "", endedByAdmin: false,
+        restarts: (a.restarts || 0) + 1, resumeGrant: (a.resumeGrant || 0) + 1, violations: [], violationCount: 0, flags: [], flagCount: 0,
+        history: [...(a.history || []), rec].slice(-10), decision: { type: "retake", deduct: 0, note: (a.decision && a.decision.note) || "", by: S.me.name || S.me.email, at: Date.now() }
+      });
+      ok++;
+    } catch (err) { permError(err); }
+  }
+  bSel.clear(); renderAll();
+  if (ok) toast("ok", "↺ تم السماح بإعادة الاختبار", `${ok} طالب — يفتحوا رابط الاختبار بنفس بياناتهم ويدوسوا «متابعة».`);
+}
+window.__retake = id => retakeStudents([S.attempts[id]]);
+window.__delBreach = id => { const a = S.attempts[id]; if (a) removeStudents([a]).then(() => { bSel.delete(id); renderBreaches(); }); };
+$("bRetakeSel").onclick = () => retakeStudents([...bSel].map(id => S.attempts[id]));
+$("bDelSel").onclick = () => removeStudents([...bSel].map(id => S.attempts[id]).filter(Boolean)).then(() => { bSel.clear(); renderBreaches(); });
 $("bSearch").oninput = renderBreaches;
 window.__decide = id => {
   const a = S.attempts[id]; if (!a) return;
@@ -1119,7 +1161,8 @@ window.__decide = id => {
   $("modalCard").innerHTML = `<div class="mh"><h3 style="font-family:var(--display);color:var(--ink)">⚖️ الإجراء مع: ${esc(a.name)}</h3><button class="btn ghost sm" id="mClose">✕</button></div>
   <div class="mb">
     <p style="color:var(--muted);margin-bottom:.6rem">${esc(a.course)} — ${esc(a.examTitle)} • مجموعة ${esc(a.group)} • <b style="color:var(--danger)">${num(a.violationCount)} خرق</b> • ${nflags(a)} ملاحظة سلوك${sc ? ` • الدرجة ${sc.raw} / ${sc.t}` : ""}</p>
-    <div class="dec-grid">${Object.entries(DEC).map(([k, v]) => `<label class="dec-opt"><input type="radio" name="decT" value="${k}" ${d.type === k ? "checked" : ""}><span>${v.ic} ${v.t}</span></label>`).join("")}</div>
+    ${(() => { const g = suggestAction(a); return `<div class="sug-box l${g.lvl}">💡 <b>مقترح المنصة:</b> ${esc(g.t)} <small>(${esc(g.why)})</small></div>`; })()}
+    <div class="dec-grid">${Object.entries(DEC).map(([k, v]) => `<label class="dec-opt"><input type="radio" name="decT" value="${k}" ${(d.type || suggestAction(a).type) === k ? "checked" : ""}><span>${v.ic} ${v.t}</span></label>`).join("")}</div>
     <div class="grid2" style="margin-top:.8rem">
       <label class="field" id="decDedBox"><span>عدد الدرجات المخصومة${sc ? ` (من ${sc.t})` : ""}</span><input class="input" id="decDed" type="number" min="0" step="0.5" value="${num(d.deduct || 0)}"></label>
       <label class="field" style="grid-column:1/-1"><span>ملاحظات / سبب القرار (تظهر في محضر الغش)</span><textarea class="input" id="decNote" rows="3" placeholder="مثلًا: خرج من الاختبار مرتين لمدة 40 ثانية — ثبت استخدام الموبايل من الصور">${esc(d.note || "")}</textarea></label>
@@ -1145,10 +1188,75 @@ window.__decide = id => {
 };
 $("btnBrPrint").onclick = () => {
   const ex = S.exams[$("bExam").value];
-  const R = myAttempts().filter(a => (!ex || a.examId === ex.id) && (a.violationCount || 0) > 0).sort(byName);
+  const R = myAttempts().filter(a => (!ex || a.examId === ex.id) && ((a.violationCount || 0) > 0 || (a.history || []).some(h => h.violationCount))).sort(byName);
   if (!R.length) return toast("ok", "🛡️ مفيش طلاب عليهم خروقات", ex ? `${ex.course} — ${ex.title}` : "كل الاختبارات");
   printCheatersList({ exam: ex, rows: R.map(a => ({ a, sc: scoreOf(a), dec: a.decision ? (DEC[a.decision.type] || {}).t + (a.decision.type === "deduct" ? ` (${a.decision.deduct} درجة)` : "") : "لم يُحدد" })), owner: S.me.name });
 };
+// ---- كشف الملتزمين: سلّموا بدون أي خرق أو تنبيه — أبجديًا بالدرجات
+window.__cleanList = from => {
+  const exId = from === "results" ? $("rExam").value : $("bExam").value, ex = S.exams[exId];
+  const R = myAttempts().filter(a => (!exId || a.examId === exId) && a.status === "submitted" && !(a.violationCount || 0) && !warnFlags(a).length && !(a.history || []).some(h => h.violationCount)).sort(byName)
+    .map(a => { const sc = scoreOf(a); return { a, sc, g: sc ? gradeOf(sc.pct, passOf(a), sc.failed) : null }; });
+  if (!R.length) return toast("danger", "لا يوجد طلاب", "مفيش طلاب سلّموا بدون إنذارات في العرض ده.");
+  const ttl = ex ? `${ex.course} — ${ex.title}` : "كل الاختبارات";
+  const rows = R.map((r, i) => ({ "م": i + 1, "اسم الطالب": r.a.name, "رقم الجلوس": r.a.seat || "", "المجموعة": r.a.group, "المقرر": r.a.course, "الاختبار": r.a.examTitle, "الدرجة": r.sc ? r.sc.s : "", "الدرجة العظمى": r.sc ? r.sc.t : "", "النسبة %": r.sc ? r.sc.pct : "", "التقدير": r.g ? r.g.label : "", "أجاب عن": r.sc ? `${r.sc.answered}/${r.sc.n}` : "", "وقت التسليم": fmtDateTime(r.a.submittedAtMs) }));
+  printCleanList({ title: ttl, rows: R, owner: S.me.name });
+  try {
+    const wb = XLSX.utils.book_new(); wb.Workbook = { Views: [{ RTL: true }] };
+    XLSX.utils.book_append_sheet(wb, sheet(rows, [5, 30, 12, 10, 22, 22, 9, 11, 9, 14, 10, 20]), "الملتزمون");
+    XLSX.writeFile(wb, `كشف-الملتزمين-${safeName(ttl)}-${new Date().toISOString().slice(0, 10)}.xlsx`);
+  } catch (err) { console.error(err); }
+};
+// ---- كشف المخالفين بالأدلة الكاملة (PDF) + Excel — أبجديًا، مع مقترح المنصة ودرجة ما أجاب عنه
+async function violatorRows(list) {
+  const out = [];
+  for (const a of list) {
+    const ev = await loadEvidence(a.id);
+    out.push({ a, sc: scoreOf(a), V: allViolations(a), F: warnFlags(a), sug: suggestAction(a), dev: a.device ? deviceText(a.device) : "",
+      dec: a.decision ? (DEC[a.decision.type] || {}).t + (a.decision.type === "deduct" ? ` (${a.decision.deduct} درجة)` : "") : "",
+      shots: ev.filter(e => (e.kind === "violation" || e.kind === "talk" || e.kind === "flag") && e.img).slice(0, 24) });
+  }
+  return out;
+}
+$("btnViolPrint").onclick = async () => {
+  const exId = $("bExam").value, ex = S.exams[exId];
+  const L = myAttempts().filter(a => (!exId || a.examId === exId) && (allViolations(a).length || warnFlags(a).length)).sort(byName);
+  if (!L.length) return toast("ok", "🛡️ مفيش مخالفين", ex ? `${ex.course} — ${ex.title}` : "كل الاختبارات");
+  const b = $("btnViolPrint"); b.disabled = true; b.textContent = `جارٍ تجميع الأدلة (${L.length})…`;
+  try {
+    const R = await violatorRows(L);
+    const ttl = ex ? `${ex.course} — ${ex.title}` : "كل الاختبارات";
+    const rows = R.map((r, i) => ({ "م": i + 1, "اسم الطالب": r.a.name, "رقم الجلوس": r.a.seat || "", "المجموعة": r.a.group, "المقرر": r.a.course, "الاختبار": r.a.examTitle,
+      "عدد الخروقات": r.V.length, "ملاحظات السلوك": r.F.length, "الخروقات بالتوقيت": r.V.map(v => `${fmtTime(v.at)}: ${v.type}${v.old ? " (قبل الإعادة)" : ""}`).join(" | "),
+      "ملاحظات بالتوقيت": r.F.map(f => `${fmtTime(f.at)}: ${String(f.type).replace(/^🔎\s*/, "")}`).join(" | "),
+      "أجاب عن": r.sc ? `${r.sc.answered}/${r.sc.n}` : "", "درجة ما أجاب عنه": r.sc ? r.sc.earned : "", "الدرجة بعد القرار": r.sc ? r.sc.s : "", "الدرجة العظمى": r.sc ? r.sc.t : "",
+      "مقترح المنصة": r.sug.t, "سبب المقترح": r.sug.why, "محضر غش": r.sug.report ? "مطلوب" : "", "قرار المشرف": r.dec || "لم يُحدد", "عدد الأدلة المصوّرة": r.shots.length }));
+    printViolatorsReport({ title: ttl, rows: R, owner: S.me.name });
+    try {
+      const wb = XLSX.utils.book_new(); wb.Workbook = { Views: [{ RTL: true }] };
+      XLSX.utils.book_append_sheet(wb, sheet(rows, [5, 28, 11, 10, 20, 20, 10, 10, 60, 50, 9, 12, 12, 10, 26, 30, 10, 22, 10]), "المخالفون");
+      XLSX.writeFile(wb, `كشف-المخالفين-${safeName(ttl)}-${new Date().toISOString().slice(0, 10)}.xlsx`);
+    } catch (err) { console.error(err); }
+  } finally { b.disabled = false; b.textContent = "🧾 كشف المخالفين بالأدلة (PDF)"; }
+};
+// ---- «محاضر الغش» — مكان ثابت أعلى كل الشاشات: الطلاب اللي المنصة شايفة إنهم محتاجين محضر (أو قرارك إحالة)
+function updateRepCount() {
+  const n = myAttempts().filter(needsReport).length;
+  const c = $("repCnt"); if (c) c.textContent = n;
+  $("btnReports").classList.toggle("hot", n > 0);
+}
+$("btnReports").onclick = () => {
+  const L = myAttempts().filter(needsReport).sort(byName);
+  $("modalCard").innerHTML = `<div class="mh"><h3 style="font-family:var(--display);color:var(--ink)">🧾 محاضر الغش (${L.length})</h3><button class="btn ghost sm" id="mClose">✕</button></div>
+  <div class="mb">${L.length ? `<p style="color:var(--muted);margin-bottom:.6rem">الطلاب دول المنصة بتقترح تحرير محضر غش ليهم حسب كمّ ونوع خروقاتهم (أو انت قررت إحالتهم). اطبع المحضر لكل طالب، أو الكل مرة واحدة.</p>
+    <div class="tbl-wrap"><table class="tbl"><thead><tr><th>الطالب</th><th>المجموعة</th><th>الاختبار</th><th>الخروقات</th><th>السبب</th><th>القرار</th><th></th></tr></thead><tbody>
+    ${L.map(a => `<tr><td class="name">${esc(a.name)}</td><td>${esc(a.group)}</td><td><small>${esc(a.course)} — ${esc(a.examTitle)}</small></td><td><span class="badge b-w3">🚨 ${allViolations(a).length}</span></td><td><small>${esc(suggestAction(a).why)}</small></td><td>${decBadge(a)}</td>
+      <td><div class="row-acts"><button class="btn gold sm" data-act="printReport" data-arg="${esc(a.id)}">🧾 المحضر</button><button class="btn ghost sm" data-act="decide" data-arg="${esc(a.id)}">⚖️</button></div></td></tr>`).join("")}</tbody></table></div>
+    <div class="toolbar" style="margin-top:.8rem"><button class="btn danger" id="repAll">🖨️ طباعة كل المحاضر بالأدلة</button></div>` : `<div class="empty"><div class="e-ic">🛡️</div>مفيش طلاب محتاجين محضر غش</div>`}</div>`;
+  $("modal").classList.remove("hidden"); $("mClose").onclick = closeModal;
+  if ($("repAll")) $("repAll").onclick = async () => { const R = await violatorRows(L); printViolatorsReport({ title: "محاضر الغش", rows: R, owner: S.me.name }); };
+};
+window.__printReport = async id => { const a = S.attempts[id]; if (!a) return; const list = await loadEvidence(id); printCheatReport({ exam: S.exams[a.examId] || { course: a.course, title: a.examTitle }, a, evidence: list, owner: S.me.name }); };
 $("btnBrExport").onclick = () => {
   const R = breachRows().sort(byName);
   if (!R.length) return toast("danger", "⚠️ لا توجد بيانات", "مفيش خروقات للتصدير.");
