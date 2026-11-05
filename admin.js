@@ -606,6 +606,8 @@ function renderExams() {
           <button data-act="edit" data-arg="${esc(e.id)}">⚙️ تعديل الإعدادات</button>
           <hr><button data-act="report" data-arg="${esc(e.id)}">📊 التقرير</button>
           <button data-act="sheet" data-arg="${esc(e.id)}">🖨️ كشف الدرجات</button>
+          <hr><button data-act="examBook" data-arg="${esc(e.id)}">📥 شيت طلاب الاختبار (Excel)</button>
+          <button data-act="examViol" data-arg="${esc(e.id)}">🚩 كشف مخالفي الاختبار بالأدلة</button>
           <hr><button data-act="del" data-arg="${esc(e.id)}" style="color:var(--danger)">🗑 حذف الاختبار</button>
         </div></div>
       </div></div>`;
@@ -1186,6 +1188,51 @@ window.__decide = id => {
     try { await updateDoc(doc(db, "attempts", id), { decision: null }); a.decision = null; closeModal(); toast("ok", "↺ تم إلغاء القرار", a.name); renderAll(); } catch (err) { permError(err); }
   };
 };
+
+// ---- تقسيم أي كشف إلى ورقة منفصلة لكل اختبار (+ ورقة مجمّعة لو أكتر من اختبار) — الترقيم يبدأ من 1 في كل ورقة
+const examLabel = a => { const e = S.exams[a.examId]; return `${(e && e.course) || a.course || ""} - ${(e && e.title) || a.examTitle || ""}`.trim(); };
+function groupByExam(list) {
+  const G = {};
+  list.forEach(a => (G[a.examId] = G[a.examId] || { id: a.examId, label: examLabel(a), list: [] }).list.push(a));
+  return Object.values(G).sort((x, y) => x.label.localeCompare(y.label, "ar"));
+}
+function bookByExam(list, rowFn, widths, allName = "كل الاختبارات") {
+  const wb = XLSX.utils.book_new(), used = new Set(), views = [], G = groupByExam(list);
+  G.forEach(g => { XLSX.utils.book_append_sheet(wb, sheet(g.list.map((a, i) => rowFn(a, i)), widths), sheetName(g.label, used)); views.push({ RTL: true }); });
+  if (G.length > 1) {
+    const all = G.flatMap(g => g.list); XLSX.utils.book_append_sheet(wb, sheet(all.map((a, i) => rowFn(a, i)), widths), sheetName(allName, used)); views.push({ RTL: true });
+  }
+  if (!G.length) { XLSX.utils.book_append_sheet(wb, sheet([], widths), "فارغ"); views.push({ RTL: true }); }
+  wb.Workbook = { Views: views };
+  return { wb, n: G.length };
+}
+
+// ---- شيت مستقل لكل اختبار: كل الطلاب الممتحنين + الملتزمون + المخالفون + لم يسلّموا
+window.__examViol = id => violPrint(id, null);
+window.__examBook = id => {
+  const e = S.exams[id]; if (!e) return;
+  const A = myAttempts().filter(a => a.examId === id).sort(byName);
+  if (!A.length) return toast("danger", "لا يوجد طلاب", `مفيش طلاب دخلوا اختبار «${e.title}» لسه.`);
+  const viol = a => allViolations(a).length > 0 || warnFlags(a).length > 0;
+  const ST = { submitted: "سلّم", locked: "مغلق", suspended: "موقوف", in_progress: "يمتحن الآن" };
+  const row = (a, i) => { const sc = scoreOf(a); const g = sc ? gradeOf(sc.pct, passOf(a), sc.failed) : null; const d = a.decision; const sug = viol(a) ? suggestAction(a) : null; return {
+    "م": i + 1, "اسم الطالب": a.name, "رقم الجلوس": a.seat || "", "المجموعة": a.group, "الحالة": ST[a.status] || a.status || "",
+    "الدرجة": sc ? sc.s : "", "الدرجة العظمى": sc ? sc.t : "", "النسبة %": sc ? sc.pct : "", "التقدير": g ? g.label : "", "أجاب عن": sc ? `${sc.answered}/${sc.n}` : "",
+    "عدد الخروقات": allViolations(a).length, "ملاحظات السلوك": warnFlags(a).length, "تفاصيل الخروقات": allViolations(a).map(v => `${fmtTime(v.at)}: ${v.type}`).join(" | "),
+    "مقترح المنصة": sug ? sug.t : "ملتزم ✓", "قرار المشرف": d ? (DEC[d.type] || {}).t + (d.type === "deduct" ? ` (${d.deduct} درجة)` : "") : "",
+    "الجهاز": a.device ? deviceText(a.device) : "", "بدأ": fmtDateTime(a.startedAtMs), "سلّم": a.submittedAtMs ? fmtDateTime(a.submittedAtMs) : "" }; };
+  const W = [5, 28, 11, 9, 11, 8, 10, 8, 12, 9, 10, 10, 60, 24, 22, 36, 18, 18];
+  const wb = XLSX.utils.book_new(), used = new Set(), views = [];
+  const add = (name, L) => { XLSX.utils.book_append_sheet(wb, sheet(L.map(row), W), sheetName(`${name} (${L.length})`, used)); views.push({ RTL: true }); };
+  const fin = A.filter(a => isFinished(a));
+  add("كل الطلاب", A);
+  add("الملتزمون", A.filter(a => a.status === "submitted" && !viol(a)));
+  add("المخالفون", A.filter(viol));
+  add("لم يسلّموا", A.filter(a => !isFinished(a)));
+  wb.Workbook = { Views: views };
+  XLSX.writeFile(wb, `طلاب-${safeName(`${e.course}-${e.title}`)}-${new Date().toISOString().slice(0, 10)}.xlsx`);
+  toast("ok", "✓ تم تنزيل شيت الاختبار", `${e.title}: ${A.length} طالب — سلّم ${fin.length}`);
+};
 $("btnBrPrint").onclick = () => {
   const ex = S.exams[$("bExam").value];
   const R = myAttempts().filter(a => (!ex || a.examId === ex.id) && ((a.violationCount || 0) > 0 || (a.history || []).some(h => h.violationCount))).sort(byName);
@@ -1199,11 +1246,11 @@ window.__cleanList = from => {
     .map(a => { const sc = scoreOf(a); return { a, sc, g: sc ? gradeOf(sc.pct, passOf(a), sc.failed) : null }; });
   if (!R.length) return toast("danger", "لا يوجد طلاب", "مفيش طلاب سلّموا بدون إنذارات في العرض ده.");
   const ttl = ex ? `${ex.course} — ${ex.title}` : "كل الاختبارات";
-  const rows = R.map((r, i) => ({ "م": i + 1, "اسم الطالب": r.a.name, "رقم الجلوس": r.a.seat || "", "المجموعة": r.a.group, "المقرر": r.a.course, "الاختبار": r.a.examTitle, "الدرجة": r.sc ? r.sc.s : "", "الدرجة العظمى": r.sc ? r.sc.t : "", "النسبة %": r.sc ? r.sc.pct : "", "التقدير": r.g ? r.g.label : "", "أجاب عن": r.sc ? `${r.sc.answered}/${r.sc.n}` : "", "وقت التسليم": fmtDateTime(r.a.submittedAtMs) }));
+  const RM = new Map(R.map(r => [r.a, r]));
+  const rowFn = (a, i) => { const r = RM.get(a); return { "م": i + 1, "اسم الطالب": a.name, "رقم الجلوس": a.seat || "", "المجموعة": a.group, "المقرر": a.course, "الاختبار": a.examTitle, "الدرجة": r.sc ? r.sc.s : "", "الدرجة العظمى": r.sc ? r.sc.t : "", "النسبة %": r.sc ? r.sc.pct : "", "التقدير": r.g ? r.g.label : "", "أجاب عن": r.sc ? `${r.sc.answered}/${r.sc.n}` : "", "وقت التسليم": fmtDateTime(a.submittedAtMs) }; };
   printCleanList({ title: ttl, rows: R, owner: S.me.name });
   try {
-    const wb = XLSX.utils.book_new(); wb.Workbook = { Views: [{ RTL: true }] };
-    XLSX.utils.book_append_sheet(wb, sheet(rows, [5, 30, 12, 10, 22, 22, 9, 11, 9, 14, 10, 20]), "الملتزمون");
+    const { wb } = bookByExam(R.map(r => r.a), rowFn, [5, 30, 12, 10, 22, 22, 9, 11, 9, 14, 10, 20], "كل الملتزمين");
     XLSX.writeFile(wb, `كشف-الملتزمين-${safeName(ttl)}-${new Date().toISOString().slice(0, 10)}.xlsx`);
   } catch (err) { console.error(err); }
 };
@@ -1218,26 +1265,27 @@ async function violatorRows(list) {
   }
   return out;
 }
-$("btnViolPrint").onclick = async () => {
-  const exId = $("bExam").value, ex = S.exams[exId];
+$("btnViolPrint").onclick = () => violPrint($("bExam").value, $("btnViolPrint"));
+async function violPrint(exId, b) {
+  const ex = S.exams[exId];
   const L = myAttempts().filter(a => (!exId || a.examId === exId) && (allViolations(a).length || warnFlags(a).length)).sort(byName);
   if (!L.length) return toast("ok", "🛡️ مفيش مخالفين", ex ? `${ex.course} — ${ex.title}` : "كل الاختبارات");
-  const b = $("btnViolPrint"); b.disabled = true; b.textContent = `جارٍ تجميع الأدلة (${L.length})…`;
+  const bt = b ? b.textContent : ""; if (b) { b.disabled = true; b.textContent = `جارٍ تجميع الأدلة (${L.length})…`; }
   try {
     const R = await violatorRows(L);
     const ttl = ex ? `${ex.course} — ${ex.title}` : "كل الاختبارات";
-    const rows = R.map((r, i) => ({ "م": i + 1, "اسم الطالب": r.a.name, "رقم الجلوس": r.a.seat || "", "المجموعة": r.a.group, "المقرر": r.a.course, "الاختبار": r.a.examTitle,
+    const RM = new Map(R.map(r => [r.a, r]));
+    const rowFn = (a, i) => { const r = RM.get(a); return { "م": i + 1, "اسم الطالب": r.a.name, "رقم الجلوس": r.a.seat || "", "المجموعة": r.a.group, "المقرر": r.a.course, "الاختبار": r.a.examTitle,
       "عدد الخروقات": r.V.length, "ملاحظات السلوك": r.F.length, "الخروقات بالتوقيت": r.V.map(v => `${fmtTime(v.at)}: ${v.type}${v.old ? " (قبل الإعادة)" : ""}`).join(" | "),
       "ملاحظات بالتوقيت": r.F.map(f => `${fmtTime(f.at)}: ${String(f.type).replace(/^🔎\s*/, "")}`).join(" | "),
       "أجاب عن": r.sc ? `${r.sc.answered}/${r.sc.n}` : "", "درجة ما أجاب عنه": r.sc ? r.sc.earned : "", "الدرجة بعد القرار": r.sc ? r.sc.s : "", "الدرجة العظمى": r.sc ? r.sc.t : "",
-      "مقترح المنصة": r.sug.t, "سبب المقترح": r.sug.why, "محضر غش": r.sug.report ? "مطلوب" : "", "قرار المشرف": r.dec || "لم يُحدد", "عدد الأدلة المصوّرة": r.shots.length }));
+      "مقترح المنصة": r.sug.t, "سبب المقترح": r.sug.why, "محضر غش": r.sug.report ? "مطلوب" : "", "قرار المشرف": r.dec || "لم يُحدد", "عدد الأدلة المصوّرة": r.shots.length }; };
     printViolatorsReport({ title: ttl, rows: R, owner: S.me.name });
     try {
-      const wb = XLSX.utils.book_new(); wb.Workbook = { Views: [{ RTL: true }] };
-      XLSX.utils.book_append_sheet(wb, sheet(rows, [5, 28, 11, 10, 20, 20, 10, 10, 60, 50, 9, 12, 12, 10, 26, 30, 10, 22, 10]), "المخالفون");
+      const { wb } = bookByExam(R.map(r => r.a), rowFn, [5, 28, 11, 10, 20, 20, 10, 10, 60, 50, 9, 12, 12, 10, 26, 30, 10, 22, 10], "كل المخالفين");
       XLSX.writeFile(wb, `كشف-المخالفين-${safeName(ttl)}-${new Date().toISOString().slice(0, 10)}.xlsx`);
     } catch (err) { console.error(err); }
-  } finally { b.disabled = false; b.textContent = "🧾 كشف المخالفين بالأدلة (PDF)"; }
+  } finally { if (b) { b.disabled = false; b.textContent = bt; } }
 };
 // ---- «محاضر الغش» — مكان ثابت أعلى كل الشاشات: الطلاب اللي المنصة شايفة إنهم محتاجين محضر (أو قرارك إحالة)
 function updateRepCount() {
@@ -1260,15 +1308,14 @@ window.__printReport = async id => { const a = S.attempts[id]; if (!a) return; c
 $("btnBrExport").onclick = () => {
   const R = breachRows().sort(byName);
   if (!R.length) return toast("danger", "⚠️ لا توجد بيانات", "مفيش خروقات للتصدير.");
-  const rows = R.map((a, i) => { const sc = scoreOf(a) || {}; const d = a.decision || {}; return {
+  const rowFn = (a, i) => { const sc = scoreOf(a) || {}; const d = a.decision || {}; return {
     "م": i + 1, "اسم الطالب": a.name, "رقم الجلوس": a.seat || "", "المجموعة": a.group, "المقرر": a.course, "الاختبار": a.examTitle,
     "عدد الخروقات": a.violationCount || 0, "ملاحظات السلوك": nflags(a),
     "تفاصيل الخروقات": (a.violations || []).map(v => `${fmtTime(v.at)}: ${v.type}`).join(" | "),
     "ملاحظات مسجلة": (a.flags || []).filter(MAJ).map(f => `${fmtTime(f.at)}: ${String(f.type).replace(/^🔎\s*/, "")}`).join(" | "),
     "الدرجة قبل القرار": sc.raw ?? "", "الدرجة بعد القرار": sc.s ?? "", "الدرجة العظمى": sc.t ?? "",
-    "الإجراء": d.type ? DEC[d.type].t : "لم يُحدد", "الدرجات المخصومة": d.deduct || 0, "ملاحظات المشرف": d.note || "", "تاريخ القرار": d.at ? fmtDateTime(d.at) : "" }; });
-  const wb = XLSX.utils.book_new(); wb.Workbook = { Views: [{ RTL: true }] };
-  XLSX.utils.book_append_sheet(wb, sheet(rows, [5, 28, 11, 10, 20, 20, 10, 10, 60, 60, 12, 12, 10, 22, 12, 40, 18]), "الخروقات والإجراءات");
+    "الإجراء": d.type ? DEC[d.type].t : "لم يُحدد", "الدرجات المخصومة": d.deduct || 0, "ملاحظات المشرف": d.note || "", "تاريخ القرار": d.at ? fmtDateTime(d.at) : "" }; };
+  const { wb } = bookByExam(R, rowFn, [5, 28, 11, 10, 20, 20, 10, 10, 60, 60, 12, 12, 10, 22, 12, 40, 18], "كل الخروقات");
   const ex = S.exams[$("bExam").value];
   XLSX.writeFile(wb, `الخروقات-${safeName(ex ? `${ex.course}-${ex.title}` : "كل-الاختبارات")}-${new Date().toISOString().slice(0, 10)}.xlsx`);
 };
@@ -1345,13 +1392,12 @@ function renderResults() {
 $("btnExport").onclick = () => {
   const R = currentRows();
   if (!R.length) return toast("danger", "⚠️ لا توجد بيانات", "لا توجد نتائج لتصديرها.");
-  const wb = XLSX.utils.book_new(); wb.Workbook = { Views: [{ RTL: true }] };
-  XLSX.utils.book_append_sheet(wb, sheet(R.map(resultRow), RES_W), "النتائج");
+  const { wb } = bookByExam(R, resultRow, RES_W, "كل النتائج");
   const ex = S.exams[$("rExam").value];
   XLSX.writeFile(wb, `نتائج-${safeName(ex ? `${ex.course}-${ex.title}` : "كل-الاختبارات")}-${new Date().toISOString().slice(0, 10)}.xlsx`);
 };
 // ---- شيت الدرجات لكل المقررات (ورقة لكل مقرر + ورقة مجمّعة) — مرتب أبجديًا
-const sheetName = (n, used) => { let b = String(n).replace(/[\[\]:*?/\\]/g, "-").slice(0, 28) || "مقرر", x = b, i = 2; while (used.has(x)) x = b.slice(0, 26) + " " + i++; used.add(x); return x; };
+function sheetName(n, used) { let b = String(n).replace(/[\[\]:*?/\\]/g, "-").slice(0, 31) || "مقرر", x = b, i = 2; while (used.has(x)) x = b.slice(0, 28) + " " + i++; used.add(x); return x; }
 $("btnAllCourses").onclick = async () => {
   const E = visibleExams();
   if (!E.length) return toast("danger", "لا توجد اختبارات", "أنشئ اختبارًا أولًا.");

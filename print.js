@@ -213,6 +213,12 @@ export function printCheatersList({ exam, rows, owner = "" }) {
 }
 
 // ------------------------------------------------------------- كشف الطلاب الملتزمين (سلّموا بدون أي إنذارات) — أبجديًا بالدرجات
+// تجميع الصفوف حسب الاختبار (كل اختبار في جدول منفصل) — مرتبة أبجديًا داخل كل اختبار
+function byExamGroups(rows) {
+  const G = {};
+  rows.forEach(r => { const k = r.a.examId || "-"; (G[k] = G[k] || { course: r.a.course, title: r.a.examTitle, list: [] }).list.push(r); });
+  return Object.values(G).sort((x, y) => `${x.course} ${x.title}`.localeCompare(`${y.course} ${y.title}`, "ar"));
+}
 export function printCleanList({ title = "", rows, owner = "" }) {
   const css = `@page{size:A4;margin:13mm 12mm}
   .head{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;border-bottom:3px double #0f7a4f;padding-bottom:10px;margin-bottom:12px}
@@ -222,12 +228,14 @@ export function printCleanList({ title = "", rows, owner = "" }) {
   table{width:100%;border-collapse:collapse;font-size:12.5px}th{background:#0f7a4f;color:#fff;padding:7px 6px;border:1px solid #0f7a4f}
   td{border:1px solid #b8c0cf;padding:6px;text-align:center}td.n{text-align:right;font-weight:700}tr:nth-child(even) td{background:#f4fbf7}
   thead{display:table-header-group}tr{page-break-inside:avoid}
-  .sign{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;margin-top:30px;text-align:center;font-size:13px;font-weight:700}.sign div{border-top:1px dashed #69748f;padding-top:6px}`;
+  .sign{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;margin-top:30px;text-align:center;font-size:13px;font-weight:700}.sign div{border-top:1px dashed #69748f;padding-top:6px}
+  .exh{font:800 15px "Cairo";color:#0f7a4f;margin:14px 0 6px;border-right:5px solid #0f7a4f;padding-right:8px}.exh small{color:#555;font-weight:600}`;
   const body = `<div class="head"><div class="r">${esc(SETTINGS.platformName)}<br>${esc(SETTINGS.department || "")}</div><div class="seal">كشف<br>الملتزمين</div><div class="l">التاريخ: ${today()}<br>${owner ? "أستاذ المقرر: " + esc(owner) : ""}</div></div>
   <h1>كشف الطلاب الذين سلّموا الاختبار بدون أي إنذارات</h1><div class="sub">${esc(title)} — عدد الطلاب: <b>${rows.length}</b></div>
+  ${byExamGroups(rows).map((G, gi, AG) => `${AG.length > 1 ? `<h2 class="exh"${gi ? ' style="page-break-before:always"' : ""}>📚 ${esc(G.course)} — ${esc(G.title)} <small>(${G.list.length} طالب)</small></h2>` : `<div class="sub">📚 ${esc(G.course)} — ${esc(G.title)}</div>`}
   <table><thead><tr><th>م</th><th>اسم الطالب</th><th>رقم الجلوس</th><th>المجموعة</th><th>الدرجة</th><th>النسبة</th><th>التقدير</th><th>وقت التسليم</th></tr></thead><tbody>
-  ${rows.map((r, i) => `<tr><td>${i + 1}</td><td class="n">${esc(r.a.name)}</td><td>${esc(r.a.seat || "—")}</td><td>${esc(r.a.group)}</td><td><b>${r.sc ? r.sc.s : "—"}</b>${r.sc ? ` / ${r.sc.t}` : ""}</td><td>${r.sc ? r.sc.pct + "%" : "—"}</td><td style="color:${r.g ? r.g.color : "#333"};font-weight:700">${esc(r.g ? r.g.label : "")}</td><td>${fmtDateTime(r.a.submittedAtMs)}</td></tr>`).join("")}
-  </tbody></table>
+  ${G.list.map((r, i) => `<tr><td>${i + 1}</td><td class="n">${esc(r.a.name)}</td><td>${esc(r.a.seat || "—")}</td><td>${esc(r.a.group)}</td><td><b>${r.sc ? r.sc.s : "—"}</b>${r.sc ? ` / ${r.sc.t}` : ""}</td><td>${r.sc ? r.sc.pct + "%" : "—"}</td><td style="color:${r.g ? r.g.color : "#333"};font-weight:700">${esc(r.g ? r.g.label : "")}</td><td>${fmtDateTime(r.a.submittedAtMs)}</td></tr>`).join("")}
+  </tbody></table>`).join("")}
   <div class="sign"><div>المراقب</div><div>أستاذ المقرر</div><div>رئيس الكنترول</div></div>
   <p dir="ltr" style="text-align:center;font-size:10px;color:#9aa3b8;margin-top:14px">© 2026 All Rights Reserved — Designed &amp; Developed by Dr. Alaa Dawood</p>`;
   return openPrint("كشف الطلاب الملتزمين", css, body);
@@ -249,11 +257,13 @@ export function printViolatorsReport({ title = "", rows, owner = "" }) {
   h3{font:800 12.5px "Cairo";color:#8b1d2c;margin:8px 0 4px}.muted{color:#69748f;font-size:11px}
   .sign{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:14px;text-align:center;font-size:11.5px;font-weight:700}.sign div{border-top:1px dashed #69748f;padding-top:5px}`;
   const LV = { record: "خرق مسجّل", warn: "إنذار", restart: "مسح وإعادة", fail: "رسوب" };
+  const GR = byExamGroups(rows); const NO = new Map(); GR.forEach(g => g.list.forEach((r, k) => NO.set(r, k + 1))); rows = GR.flatMap(g => g.list); const multi = GR.length > 1;
   const body = `<div class="head"><div class="r">${esc(SETTINGS.platformName)}<br>${esc(SETTINGS.department || "")}</div><div class="seal">كشف<br>المخالفين<br>بالأدلة</div><div class="l">التاريخ: ${today()}<br>${owner ? "أستاذ المقرر: " + esc(owner) : ""}</div></div>
   <h1>كشف الطلاب المخالفين — الخروقات والأدلة والإجراء المقترح</h1><p class="muted" style="text-align:center">${esc(title)} — عدد الطلاب: <b>${rows.length}</b> (مرتب أبجديًا)</p>
+  ${GR.map(G => `<h3 style="font-size:13.5px;color:#1b2d5c">📚 ${esc(G.course)} — ${esc(G.title)} (${G.list.length} طالب)</h3>
   <table class="idx"><thead><tr><th>م</th><th>اسم الطالب</th><th>الجلوس</th><th>المجموعة</th><th>الخروقات</th><th>ملاحظات</th><th>درجة ما أجاب عنه</th><th>مقترح المنصة</th><th>قرار المشرف</th></tr></thead><tbody>
-  ${rows.map((r, i) => `<tr><td>${i + 1}</td><td class="n">${esc(r.a.name)}</td><td>${esc(r.a.seat || "—")}</td><td>${esc(r.a.group)}</td><td><b>${r.V.length}</b></td><td>${r.F.length}</td><td>${r.sc ? `${r.sc.earned} / ${r.sc.t} (أجاب ${r.sc.answered}/${r.sc.n})` : "—"}</td><td>${esc(r.sug.t)}</td><td>${esc(r.dec || "لم يُحدد")}</td></tr>`).join("")}</tbody></table>
-  ${rows.map((r, i) => `<section class="st"><h2>${i + 1}. ${esc(r.a.name)} ${r.sug.report ? "— 🧾 مطلوب تحرير محضر غش" : ""}</h2>
+  ${G.list.map((r, i) => `<tr><td>${i + 1}</td><td class="n">${esc(r.a.name)}</td><td>${esc(r.a.seat || "—")}</td><td>${esc(r.a.group)}</td><td><b>${r.V.length}</b></td><td>${r.F.length}</td><td>${r.sc ? `${r.sc.earned} / ${r.sc.t} (أجاب ${r.sc.answered}/${r.sc.n})` : "—"}</td><td>${esc(r.sug.t)}</td><td>${esc(r.dec || "لم يُحدد")}</td></tr>`).join("")}</tbody></table>`).join("")}
+  ${rows.map((r, i) => `<section class="st">${multi ? `<div class="muted" style="margin-bottom:3px">📚 ${esc(r.a.course)} — ${esc(r.a.examTitle)}</div>` : ""}<h2>${NO.get(r) || i + 1}. ${esc(r.a.name)} ${r.sug.report ? "— 🧾 مطلوب تحرير محضر غش" : ""}</h2>
     <div class="kv"><div>الجلوس: <b>${esc(r.a.seat || "—")}</b></div><div>المجموعة: <b>${esc(r.a.group)}</b></div><div>المقرر: <b>${esc(r.a.course)}</b></div><div>الاختبار: <b>${esc(r.a.examTitle)}</b></div>
       <div>بدأ: <b>${fmtDateTime(r.a.startedAtMs)}</b></div><div>سلّم: <b>${r.a.submittedAtMs ? fmtDateTime(r.a.submittedAtMs) : "لم يسلّم"}</b></div><div>الجهاز: <b>${esc(r.dev || "—")}</b></div><div>الميثاق: <b>${r.a.pledge ? "وقّع ✓ " + fmtDateTime(r.a.pledge.at) : "—"}</b></div>
       <div>أجاب عن: <b>${r.sc ? `${r.sc.answered} من ${r.sc.n}` : "—"}</b></div><div>درجة ما أجاب عنه: <b>${r.sc ? `${r.sc.earned} / ${r.sc.t}` : "—"}</b></div><div>الدرجة بعد القرار: <b>${r.sc ? `${r.sc.s} / ${r.sc.t}` : "—"}</b></div><div>مرات الإعادة: <b>${(r.a.history || []).length}</b></div></div>

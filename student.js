@@ -8,6 +8,7 @@ import { pickQuestions, isAnswered } from "./scoring.js";
 import { TYPE_LABEL } from "./parser.js";
 import { loadFaceDetector, detectFaces, faceReady, loadObjectDetector, detectObjects, objectsReady } from "./face.js";
 import { startVoice, recordClip } from "./audio.js";
+import { startSpeech, buildContext, speechSupported } from "./speech.js";
 import { deviceInfo, inSEB, osKind, sebSupported, sebLink, osLabel, typeLabel, SEB_DOWNLOAD } from "./device.js";
 let devInfo = null; deviceInfo().then(d => devInfo = d).catch(() => { });
 import { mountGuide } from "./guide.js";
@@ -359,6 +360,7 @@ function renderRules() {
     if (exam.camera) R.push(["🔎", "سلوكك طول الاختبار بيتسجل بالصور" + (micOn() ? " والصوت" : "") + " والتوقيت ويراجعه المشرف (الكلام، ظهور موبايل أو شخص تاني، السماعات…)", ""]);
   } else {
     if (micOn()) R.push(["🎙️", "الكلام مع أي حد أثناء الاختبار بيترصد بالميكروفون ويتسجّل كدليل — تكراره = محاولة غش", "red"]);
+    if (micOn() && SETTINGS.speechWatch !== false && exam.speech !== false) R.push(["👂", "المنصة بتفهم الكلام: لو اتقال السؤال أو الإجابات (زي «الإجابة ب» أو «اختار ج») أو اتطلبت إجابات = <b>خرق غش فوري</b> بالصورة والصوت — ممنوع تقرأ الأسئلة أو الإجابات بصوت حتى لنفسك", "red"]);
     if (exam.camera && exam.faceAI) R.push(["📵", "ظهور موبايل أو شخص تاني أمام الكاميرا = غش • تكرار النظر بعيدًا 3 مرات = غش", "red"]);
     if (exam.camera) R.push(["🎧", "ممنوع السماعات (بلوتوث أو سلك) والكاميرات الافتراضية، وممنوع تصوير الشاشة أو فتح المنصة في تبويب تاني", "red"]);
     R.push(["🚫", "الخروج من صفحة الاختبار أو فتح أي تطبيق أو شاشة أخرى" + (exam.camera ? " أو الابتعاد عن الكاميرا" : "") + " = محاولة غش", "red"]);
@@ -529,8 +531,31 @@ $("cbRetry").onclick = async () => {
 };
 
 // ---- رصد الكلام بالميكروفون
+let speech = null, speechCtx = null, speechCount = 0, speechState = "";
+function startSpeechWatch() {
+  if (speech) { speech.stop(); speech = null; }
+  if (!running || !micOn() || !micOk || SETTINGS.speechWatch === false || exam.speech === false || !speechSupported()) return;
+  speechCtx = buildContext(order.map(id => qById[id]).filter(Boolean));
+  speech = startSpeech({
+    lang: SETTINGS.speechLang || "ar-EG",
+    getContext: () => speechCtx,
+    onState: st => { if (st === speechState) return; speechState = st; if (st.startsWith("denied")) flag("🔎 تعذّر تشغيل «فهم الكلام» على هذا الجهاز — يكمل رصد الصوت العادي"); },
+    onHit: onSpeechHit
+  });
+}
+// الطالب (أو حد جنبه) قال السؤال أو الإجابات أو اتكلم عن الغش ← خرق فوري بالصورة + مقطع صوتي
+async function onSpeechHit(h) {
+  if (!running) return;
+  speechCount++;
+  const type = `${h.label}: «${h.said.slice(0, 90)}»`;
+  recordMajor(type);
+  const clip = await Promise.race([clipP || recordClip(camStream, 5000), new Promise(r => setTimeout(() => r(null), 7000))]);
+  clipP = null;
+  if (clip && running) saveEvidence("talk", `🎙️ تسجيل صوتي — ${h.label}`.slice(0, 280), clip);
+}
 function startVoiceMonitor() {
   if (voice) { voice.stop(); voice = null; }
+  startSpeechWatch();
   if (!running || !micOn() || !micOk || !camStream) return;
   voice = startVoice(camStream, {
     talkSec: SETTINGS.talkSec || 3,
@@ -551,7 +576,7 @@ async function onTalk() {
   if (talkCount % per === 0) violation(`التحدث أثناء الاختبار (تكرر رصد الكلام ${talkCount} مرات)`);
   else toast(`🎙️ تم رصد صوت كلام — ممنوع التحدث أثناء الاختبار (${talkCount % per} من ${per})`, 4500);
 }
-function stopCamera() { if (voice) { voice.stop(); voice = null; } if (camStream) camStream.getTracks().forEach(t => { t.onended = null; t.stop(); }); camStream = null; camOk = false; micOk = false; }
+function stopCamera() { if (voice) { voice.stop(); voice = null; } if (speech) { speech.stop(); speech = null; } if (camStream) camStream.getTracks().forEach(t => { t.onended = null; t.stop(); }); camStream = null; camOk = false; micOk = false; }
 
 async function startFaceCheck() {
   checks.face = "wait"; checks.faceMsg = "جارٍ تحميل كشف الوجه بالذكاء الاصطناعي…"; renderChecks();
@@ -1040,6 +1065,9 @@ const WARN_MAP = [
   [/خارج مكان الاختبار/, "إنت خارج مكان الاختبار", "لازم تمتحن من جوه القاعة"],
   [/شاشة إضافية/, "فيه شاشة إضافية متوصلة", "افصل أي شاشة إضافية"],
   [/النظر بعيدًا/, "بتبص بعيد عن الشاشة", "ركّز في شاشتك — النظر يمين وشمال بيتسجل عليك"],
+  [/إملاء/, "اتسمعت بتملي إجابات", "قول الإجابات أو إملاؤها لحد = غش صريح — صوتك وصورتك اتسجلوا"],
+  [/بصوت مسموع/, "اتسمعت بتقرأ السؤال أو الإجابة بصوت", "قراءة الأسئلة أو الإجابات بصوت عالي ممنوعة — صوتك وصورتك اتسجلوا"],
+  [/حديث عن الغش/, "اتسمعت بتطلب أو تدي إجابات", "طلب الإجابات أو إرسال الأسئلة لحد = غش — صوتك وصورتك اتسجلوا"],
   [/كلام/, "اتكلمت أثناء الاختبار", "الكلام مع أي حد ممنوع — صوتك اتسجّل"],
   [/ملء الشاشة/, "خرجت من وضع ملء الشاشة", "خليك في ملء الشاشة لحد ما تسلّم"],
   [/نسخ|لصق|قص |سحب|اختصار|القائمة/, "حاولت تنسخ أو تستخدم اختصارات", "النسخ واللصق والاختصارات ممنوعة"],
@@ -1110,7 +1138,7 @@ function record(type) {
   if (exam && exam.camera) saveEvidence("flag", type).then(img => { if (!lastRec["tg:" + key] || now - lastRec["tg:" + key] > 60000) { lastRec["tg:" + key] = now; tg(`🔎 سلوك مسجّل\n${who()}\n${type}`, img); } });
 }
 // الخروقات الكبيرة: تُسجَّل وتُخصم من الدرجة — بدون إخراج الطالب ولا تنبيهه أثناء الاختبار
-const MAJOR = /خارج مكان الاختبار|بدأ الاختبار مع|موبايل|شخص آخر|أكثر من شخص|إيقاف الكاميرا|إيقاف الميكروفون|الكاميرا غير مفعّلة|الميكروفون غير مفعّل|سماعة|كاميرا افتراضية|تصوير الشاشة|تبويب أو نافذة أخرى|صورة الكاميرا ثابتة|عدم ظهور الطالب|شاشة إضافية/;
+const MAJOR = /إملاء|بصوت مسموع|حديث عن الغش|خارج مكان الاختبار|بدأ الاختبار مع|موبايل|شخص آخر|أكثر من شخص|إيقاف الكاميرا|إيقاف الميكروفون|الكاميرا غير مفعّلة|الميكروفون غير مفعّل|سماعة|كاميرا افتراضية|تصوير الشاشة|تبويب أو نافذة أخرى|صورة الكاميرا ثابتة|عدم ظهور الطالب|شاشة إضافية/;
 let myViol = [], lastMajor = {}, leaveStart = 0;
 function recordMajor(type, leave) {
   if (!running) return;

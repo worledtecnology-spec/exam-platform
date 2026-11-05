@@ -68,6 +68,8 @@ export const SETTINGS = {
   awayPerViolation: 3,     // كل كذا مرة نظر بعيدًا = محاولة غش
   talkSec: 3,              // كلام متواصل كذا ثانية = رصد كلام
   talkPerViolation: 3,     // كل كذا مرة كلام = محاولة غش
+  speechWatch: true,       // فهم الكلام: إملاء الإجابات/قراءة السؤال/طلب الإجابات = خرق فوري بالصورة والصوت
+  speechLang: "ar-EG",     // لغة التعرّف على الكلام (عربي مصري)
 
   // إشعارات تيليجرام على الموبايل (اختياري) — الصق رابط Google Apps Script بعد نشر ملف telegram-relay.gs
   telegramRelayUrl: "",
